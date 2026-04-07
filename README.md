@@ -1,28 +1,24 @@
 # OBS Yahoo Fantasy Football Overlay (Local)
 
-A lightweight local Node.js + Express app that renders a polished, OBS-ready browser overlay for Yahoo Fantasy Football weekly matchups.
+Local Node.js + Express app for an OBS Browser Source overlay that shows Yahoo Fantasy Football weekly matchups with live scoreboard updates and TD player alerts.
 
-## What You Get
-- Yahoo Fantasy API integration with local OAuth flow
-- Live matchup polling with automatic push updates over Server-Sent Events (SSE)
-- OBS-friendly overlay route at `/overlay` with transparent background
-- Rotating matchup carousel and optional ticker mode
-- Admin UI at `/admin` for credentials, league config, display toggles, and theme controls
-- Cache fallback (`/cache/matchups.json`) so the overlay stays up during API failures
-- Mock mode for previewing layout without Yahoo auth
-- Scene presets: bottom ticker, sidebar widget, lower-third, centered card
-- Bonus features included:
-  - Closest matchup highlight
-  - Upset alert highlight
-  - Game of the Week pin
-  - Manual next-matchup trigger (admin button + keyboard shortcut `N` / `→`)
-  - Optional score-change webhook/sound hook
-  - Live TD player alerts (starter touchdown detection)
+## Highlights
+- Yahoo OAuth flow with local token storage and auto-refresh
+- Live matchup scoreboard polling (default: every 10 seconds)
+- TD scan polling for live matchups (default: every 10 seconds)
+- Push updates via SSE (`/events`) with no full page reload in OBS
+- Overlay route with transparent background: `/overlay`
+- Admin/config UI: `/admin`
+- Mock mode for styling before Yahoo auth is complete
+- Cache fallback if Yahoo fails temporarily
+- Optional admin API key protection for config/control routes
+- Health and metrics endpoints for local reliability checks
+- Scene presets: centered card, lower-third, sidebar widget, bottom ticker
 
 ## Project Structure
 
 ```txt
-OBS/
+FantasyFootball-Yahoo/
 ├─ client/
 │  ├─ admin.html
 │  ├─ admin.css
@@ -37,8 +33,11 @@ OBS/
 │  ├─ yahooApi.js
 │  ├─ normalizer.js
 │  ├─ configStore.js
+│  ├─ secretStore.js
 │  ├─ tokenStore.js
 │  ├─ cacheStore.js
+│  ├─ tdStateStore.js
+│  ├─ metrics.js
 │  ├─ sseHub.js
 │  ├─ mockData.js
 │  ├─ defaultSettings.js
@@ -56,20 +55,25 @@ OBS/
 │  └─ settings.example.json
 ├─ cache/
 │  └─ .gitkeep
+├─ test/
+│  ├─ normalizer.test.js
+│  └─ dataService.test.js
 ├─ .env.example
 ├─ .gitignore
+├─ Dockerfile
+├─ docker-compose.yml
 ├─ package.json
 └─ README.md
 ```
 
-## Install & Run
+## Quick Start
 
 1. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Copy environment template:
+2. Create env file:
 ```bash
 cp .env.example .env
 ```
@@ -83,81 +87,87 @@ or
 npm start
 ```
 
-4. Open admin page:
+4. Open admin UI:
 - [http://localhost:3030/admin](http://localhost:3030/admin)
 
-5. Overlay URL:
+5. Overlay preview:
 - [http://localhost:3030/overlay](http://localhost:3030/overlay)
 
-## Yahoo OAuth Setup (Practical Flow)
+## Environment Variables
 
-1. Create a Yahoo developer app and get:
-- Client ID
-- Client Secret
+Use `.env` (see `.env.example`):
 
-2. In Yahoo app settings, set redirect URI to:
-- `http://localhost:3030/auth/callback`
-
-3. In `/admin`, enter:
-- Client ID
-- Client Secret
-- Redirect URI
-- Scope (`fspt-r`)
-
-4. Save settings, then click **Start Yahoo OAuth**.
-
-5. Complete Yahoo authorization in browser.
-
-6. App stores tokens locally in:
-- `config/tokens.json`
-
-7. Token behavior:
-- Access token auto-refreshes when needed
-- Refresh token is reused and replaced if Yahoo returns a new one
-
-## League & Data Configuration
-
-Use `/admin` to set:
-- `league_id`
-- `game_key` (recommended)
-- OR `season` (app attempts to resolve `game_key`)
-- week (`current` or custom week)
-- polling interval
-- retry/backoff max delay
-- optional team name overrides JSON
-
-Example overrides JSON:
-```json
-{
-  "449.l.12345.t.1": "PrimeTime Ballers",
-  "449.l.12345.t.4": "Monday Night Mayhem"
-}
+```bash
+PORT=3030
+APP_BASE_URL=http://localhost:3030
+YAHOO_CLIENT_ID=
+YAHOO_CLIENT_SECRET=
+YAHOO_REDIRECT_URI=http://localhost:3030/auth/callback
+MOCK_MODE=true
+ADMIN_API_KEY=
 ```
 
-## Overlay Display Controls
+Notes:
+- If `ADMIN_API_KEY` is set, protected admin endpoints require `x-admin-key`.
+- Yahoo secret is persisted locally in `config/secrets.json` (gitignored).
 
-From admin page you can configure:
-- Carousel or ticker mode
-- One-matchup or two-matchup layout
-- Rotation interval
-- Compact/full layout
-- Show/hide projections, records, logos, footer ticker
-- Show/hide TD alerts + alert duration
-- Closest matchup + upset alerts
-- Game of the Week matchup id
-- Scene preset
-- Theme colors and font scale
+## Yahoo OAuth Setup
+
+1. Create Yahoo developer app and get Client ID + Client Secret.
+2. Set Yahoo redirect URI to:
+- `http://localhost:3030/auth/callback`
+3. In `/admin`, enter client ID/secret/redirect URI/scope.
+4. Click **Save Settings**.
+5. Click **Start Yahoo OAuth** and complete authorization.
+
+Stored locally:
+- OAuth tokens: `config/tokens.json`
+- Secret cache: `config/secrets.json`
+
+If tokens expire, refresh is handled automatically when possible.
+
+## Polling and Live Update Behavior
+
+Default polling values:
+- `data.scoreboardPollMs`: `10000`
+- `data.tdScanIntervalMs`: `10000`
+- `data.refreshIntervalMs`: `10000` (fallback/general)
+
+Behavior:
+- Scoreboard poll checks matchup/score changes.
+- TD scan checks active starters on live matchups only.
+- Changes are pushed to overlay through SSE.
+- Overlay avoids full page refresh and avoids rerender on TD-only updates.
+- Exponential backoff is applied on failures, bounded by `maxRetryDelayMs`.
+- Cached data is reused on transient Yahoo failures.
+
+## Admin UI Features
+
+`/admin` supports:
+- Yahoo credentials + OAuth controls
+- League settings (`leagueId`, `gameKey`/`season`, week)
+- Polling intervals and retry settings
+- Overlay controls (mode, layout, rotation, projections, records, logos, ticker)
+- TD alerts + duration
+- Closest/upset highlighting
+- Manual Game of the Week pin
+- Optional webhook hook URL for score/TD events
+- Theme controls (colors/font scale)
+- Reduced motion mode
+- Config export/import
+- Force refresh + force next matchup controls
 
 ## OBS Browser Source Setup
 
-1. Add **Browser Source** in OBS.
-2. Set URL to:
+1. Add a **Browser Source** in OBS.
+2. Use URL:
 - `http://localhost:3030/overlay`
-3. Recommended dimensions:
+3. Suggested base size:
 - Width: `1920`
 - Height: `1080`
-4. Keep background transparent (default in this overlay).
-5. Optional query params for per-scene variants:
+4. Keep transparency enabled (default page background is transparent).
+
+Useful query params:
 - `?preset=centered-card`
 - `?preset=lower-third`
 - `?preset=sidebar-widget`
@@ -170,105 +180,72 @@ Examples:
 - `http://localhost:3030/overlay?preset=lower-third`
 - `http://localhost:3030/overlay?preset=sidebar-widget&twoUp=1&scale=0.95`
 
-## Live Update Behavior
+## API Endpoints
 
-- Polls Yahoo on configured interval
-- Uses SSE (`/events`) to push updates to overlay immediately
-- Detects changed scores and animates score values
-- Avoids full page reload/flicker
-- Backoff retry when Yahoo fails
-- Uses last known cache if upstream is down
+Core:
+- `GET /health`
+- `GET /metrics`
+- `GET /events`
+- `GET /api/public-config`
 
-## Mock/Fallback Preview Mode
+Protected when admin key is enabled:
+- `GET /api/config`
+- `PUT /api/config`
+- `GET /api/config/export`
+- `POST /api/config/import`
+- `GET /api/status`
+- `POST /api/refresh`
+- `POST /api/test-connection`
+- `POST /api/control/next`
+- `POST /api/auth/logout`
+- `GET /auth/start`
 
-If Yahoo auth is not ready yet:
-- Enable **Mock mode** in `/admin`
-- Overlay generates dynamic sample matchups
-- Use this for style/layout tuning before live auth
+## Testing
 
-## Config & Theme Files
-
-- Main runtime config: `config/settings.json`
-- Example config: `config/settings.example.json`
-- Env template: `.env.example`
-- Sample palette files: `public/themes/*.css`
-
-## Sound Hook (Optional)
-
-Set `soundHookUrl` in admin. On score or TD updates, the server sends:
-
-```json
-{
-  "type": "overlay_update",
-  "scoreChanges": [
-    {
-      "matchupId": "...",
-      "teamA": {"from": 98.3, "to": 101.7, "key": "..."},
-      "teamB": {"from": 87.2, "to": 87.2, "key": "..."}
-    }
-  ],
-  "tdEvents": [
-    {
-      "playerName": "Amon-Ra St. Brown",
-      "fantasyTeamName": "PrimeTime Ballers",
-      "tdTypes": ["Receiving TD"]
-    }
-  ],
-  "ts": "2026-04-06T00:00:00.000Z"
-}
+Run test suite:
+```bash
+npm test
 ```
 
-When there are no score/TD changes, no hook payload is sent.
+Includes:
+- Yahoo payload normalization tests
+- TD diff/state serialization tests
+- Score change detection tests
 
-Legacy score-only shape (still conceptually supported):
+## Docker
 
-```json
-{
-  "type": "overlay_update",
-  "changes": [
-    {
-      "matchupId": "...",
-      "teamA": {"from": 98.3, "to": 101.7, "key": "..."},
-      "teamB": {"from": 87.2, "to": 87.2, "key": "..."}
-    }
-  ],
-  "ts": "2026-04-06T00:00:00.000Z"
-}
+Build and run:
+```bash
+docker compose up --build
 ```
 
-Use that endpoint to trigger local audio or stream automation.
+Then open:
+- [http://localhost:3030/admin](http://localhost:3030/admin)
+- [http://localhost:3030/overlay](http://localhost:3030/overlay)
 
 ## Troubleshooting
 
-### OAuth fails or callback errors
-- Verify redirect URI matches exactly in Yahoo app and admin config
-- Ensure Client ID/Secret are correct
-- Re-run OAuth from `/admin`
-- Clear tokens using **Clear Stored Tokens** and retry
+### Yahoo auth fails
+- Confirm Yahoo redirect URI exactly matches `http://localhost:3030/auth/callback`.
+- Verify client ID/secret in admin.
+- Use **Clear Stored Tokens**, then retry OAuth.
 
-### No live data
-- Confirm mock mode is OFF
-- Confirm `league_id` and `game_key` are correct
-- Use **Test API Connection** in admin
-- Check server logs for Yahoo response errors
+### No matchup data
+- Check `leagueId` and `gameKey`.
+- Use **Test API Connection** in admin.
+- Temporarily enable mock mode to confirm overlay rendering.
 
 ### Overlay not updating in OBS
-- Confirm OBS Browser Source URL is `http://localhost:3030/overlay`
-- Ensure local app is running
-- Click **Force Refresh** in admin
-- If needed, refresh Browser Source in OBS
+- Confirm app is running and SSE endpoint `/events` is reachable.
+- Check `/health` and `/metrics` for poll/error counters.
+- Use **Force Refresh** in admin.
 
-### Logos missing
-- Yahoo logos are used when available
-- Overlay automatically falls back to generated initials badge
+### TD alerts missing
+- Ensure `showTdAlerts` is enabled.
+- TD scan only evaluates live matchups and non-bench starters.
+- If league stat labels differ, fallback TD stat mapping is applied.
 
-### Rate-limit or intermittent Yahoo errors
-- Increase refresh interval (e.g., 45s to 60s+)
-- Keep backoff enabled (default)
-- App will keep rendering cached data on transient failures
+### Admin routes return 401
+- `ADMIN_API_KEY` or `security.adminApiKey` is enabled.
+- Provide the same key in admin UI and retry.
 
-## Notes
-
-- This app is local-first and production-minded for stream reliability.
-- Credentials and tokens are stored locally for convenience in development workflows.
-- If you want, this can be extended with SQLite persistence and historical matchup snapshots.

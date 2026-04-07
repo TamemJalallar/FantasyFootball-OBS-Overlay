@@ -395,6 +395,42 @@ body.compact .team-score {
   font-size: calc(32px * var(--font-scale));
 }
 
+body.reduced-motion .matchup-wrap,
+body.reduced-motion .score-pop,
+body.reduced-motion .td-alert.show,
+body.reduced-motion .td-alert.hide {
+  animation: none !important;
+}
+
+body.reduced-motion .td-alert {
+  opacity: 1;
+  transform: none;
+}
+
+body.reduced-motion .ticker-track,
+body.reduced-motion .footer-ticker .line {
+  animation-duration: 120s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matchup-wrap,
+  .score-pop,
+  .td-alert.show,
+  .td-alert.hide {
+    animation: none !important;
+  }
+
+  .td-alert {
+    opacity: 1;
+    transform: none;
+  }
+
+  .ticker-track,
+  .footer-ticker .line {
+    animation-duration: 120s;
+  }
+}
+
 @keyframes enter {
   from {
     opacity: 0;

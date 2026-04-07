@@ -3,11 +3,12 @@ require('dotenv').config();
 const path = require('node:path');
 const express = require('express');
 const { createLogger } = require('./logger');
-const { loadSettings, updateSettings, redactSecrets } = require('./configStore');
+const { loadSettings, updateSettings, redactSecrets, getAdminApiKey } = require('./configStore');
 const { YahooAuthService } = require('./yahooAuth');
 const { YahooApiClient } = require('./yahooApi');
 const { DataService } = require('./dataService');
 const { SseHub } = require('./sseHub');
+const { Metrics } = require('./metrics');
 
 const app = express();
 const port = Number(process.env.PORT || 3030);
@@ -15,20 +16,23 @@ const rootDir = process.cwd();
 
 const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
 const sseHub = new SseHub(logger);
+const metrics = new Metrics();
 
 const getSettings = async () => loadSettings();
 
 const authService = new YahooAuthService({ logger, getSettings });
-const yahooApi = new YahooApiClient({ logger, authService });
+const yahooApi = new YahooApiClient({ logger, authService, metrics });
 const dataService = new DataService({
   logger,
   getSettings,
   yahooApi,
   authService,
-  sseHub
+  sseHub,
+  metrics
 });
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false }));
 app.use('/assets', express.static(path.resolve(rootDir, 'public', 'assets')));
 app.use('/themes', express.static(path.resolve(rootDir, 'public', 'themes')));
 app.use('/client', express.static(path.resolve(rootDir, 'client')));
@@ -43,13 +47,53 @@ function buildPublicRuntimeSettings(settings) {
     },
     data: {
       refreshIntervalMs: settings.data.refreshIntervalMs,
+      scoreboardPollMs: settings.data.scoreboardPollMs,
+      tdScanIntervalMs: settings.data.tdScanIntervalMs,
       mockMode: settings.data.mockMode
     },
     overlay: settings.overlay,
     theme: settings.theme,
-    dev: settings.dev
+    dev: settings.dev,
+    security: {
+      reducedAnimations: settings.security?.reducedAnimations || false,
+      adminApiKeyRequired: Boolean(settings.security?.adminApiKey || process.env.ADMIN_API_KEY)
+    }
   };
 }
+
+async function requireAdmin(req, res, next) {
+  const requiredKey = await getAdminApiKey();
+  if (!requiredKey) {
+    return next();
+  }
+
+  const providedKey = String(req.header('x-admin-key') || req.query.adminKey || '').trim();
+  if (providedKey && providedKey === requiredKey) {
+    return next();
+  }
+
+  return res.status(401).json({
+    ok: false,
+    message: 'Unauthorized. Provide valid x-admin-key.'
+  });
+}
+
+app.get('/health', (_req, res) => {
+  const snapshot = dataService.getSnapshot();
+  res.json({
+    ok: true,
+    service: 'obs-yahoo-fantasy-overlay',
+    timestamp: new Date().toISOString(),
+    status: snapshot.status,
+    hasPayload: Boolean(snapshot.payload),
+    metrics: metrics.snapshot()
+  });
+});
+
+app.get('/metrics', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+  res.send(metrics.toPrometheus());
+});
 
 app.get('/', (_req, res) => {
   res.redirect('/admin');
@@ -71,6 +115,7 @@ app.get('/events', async (req, res) => {
 
   res.flushHeaders();
   sseHub.register(res);
+  metrics.inc('sse_clients_connected_total');
 
   const settings = await getSettings();
   const authStatus = await authService.getAuthStatus();
@@ -88,34 +133,27 @@ app.get('/events', async (req, res) => {
   });
 });
 
-app.get('/api/config', async (_req, res) => {
+app.get('/api/public-config', async (_req, res) => {
+  const settings = await getSettings();
+  res.json({ settings: buildPublicRuntimeSettings(settings) });
+});
+
+app.get('/api/config', requireAdmin, async (_req, res) => {
   const settings = await getSettings();
   res.json({
     settings: redactSecrets(settings)
   });
 });
 
-app.get('/api/status', async (_req, res) => {
+app.get('/api/config/export', requireAdmin, async (_req, res) => {
   const settings = await getSettings();
-  const authStatus = await authService.getAuthStatus();
-
-  res.json({
-    status: dataService.buildStatus(),
-    auth: authStatus,
-    mode: settings.data.mockMode ? 'mock' : 'yahoo'
-  });
+  const safe = redactSecrets(settings);
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="overlay-config.export.json"');
+  res.send(JSON.stringify(safe, null, 2));
 });
 
-app.get('/api/data', (_req, res) => {
-  res.json(dataService.getSnapshot());
-});
-
-app.get('/api/public-config', async (_req, res) => {
-  const settings = await getSettings();
-  res.json({ settings: buildPublicRuntimeSettings(settings) });
-});
-
-app.put('/api/config', async (req, res) => {
+app.post('/api/config/import', requireAdmin, async (req, res) => {
   const incoming = req.body || {};
   const current = await getSettings();
 
@@ -129,6 +167,10 @@ app.put('/api/config', async (req, res) => {
     if (!incoming.yahoo.scope) {
       incoming.yahoo.scope = current.yahoo.scope || 'fspt-r';
     }
+  }
+
+  if (incoming.security && incoming.security.adminApiKey === '********') {
+    incoming.security.adminApiKey = current.security.adminApiKey;
   }
 
   const settings = await updateSettings(incoming);
@@ -145,12 +187,62 @@ app.put('/api/config', async (req, res) => {
   });
 });
 
-app.post('/api/refresh', async (_req, res) => {
+app.get('/api/status', requireAdmin, async (_req, res) => {
+  const settings = await getSettings();
+  const authStatus = await authService.getAuthStatus();
+
+  res.json({
+    status: dataService.buildStatus(),
+    auth: authStatus,
+    mode: settings.data.mockMode ? 'mock' : 'yahoo',
+    metrics: metrics.snapshot()
+  });
+});
+
+app.get('/api/data', requireAdmin, (_req, res) => {
+  res.json(dataService.getSnapshot());
+});
+
+app.put('/api/config', requireAdmin, async (req, res) => {
+  const incoming = req.body || {};
+  const current = await getSettings();
+
+  if (incoming.yahoo) {
+    if (!incoming.yahoo.clientSecret || incoming.yahoo.clientSecret === '********') {
+      incoming.yahoo.clientSecret = current.yahoo.clientSecret;
+    }
+    if (!incoming.yahoo.redirectUri) {
+      incoming.yahoo.redirectUri = current.yahoo.redirectUri;
+    }
+    if (!incoming.yahoo.scope) {
+      incoming.yahoo.scope = current.yahoo.scope || 'fspt-r';
+    }
+  }
+
+  if (incoming.security && incoming.security.adminApiKey === '********') {
+    incoming.security.adminApiKey = current.security.adminApiKey;
+  }
+
+  const settings = await updateSettings(incoming);
+
+  sseHub.broadcast('config', {
+    settings: buildPublicRuntimeSettings(settings)
+  });
+
+  await dataService.forceRefresh();
+
+  res.json({
+    ok: true,
+    settings: redactSecrets(settings)
+  });
+});
+
+app.post('/api/refresh', requireAdmin, async (_req, res) => {
   await dataService.forceRefresh();
   res.json({ ok: true });
 });
 
-app.post('/api/test-connection', async (_req, res) => {
+app.post('/api/test-connection', requireAdmin, async (_req, res) => {
   try {
     const result = await dataService.testConnection();
     res.json(result);
@@ -162,17 +254,17 @@ app.post('/api/test-connection', async (_req, res) => {
   }
 });
 
-app.post('/api/control/next', (_req, res) => {
+app.post('/api/control/next', requireAdmin, (_req, res) => {
   dataService.manualNext();
   res.json({ ok: true });
 });
 
-app.post('/api/auth/logout', async (_req, res) => {
+app.post('/api/auth/logout', requireAdmin, async (_req, res) => {
   await authService.logout();
   res.json({ ok: true });
 });
 
-app.get('/auth/start', async (_req, res) => {
+app.get('/auth/start', requireAdmin, async (_req, res) => {
   try {
     const { url } = await authService.getAuthorizeUrl();
     res.redirect(url);

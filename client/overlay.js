@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   settings: null,
   payload: null,
+  payloadRenderKey: null,
   status: null,
   activeIndex: 0,
   rotationTimer: null,
@@ -45,6 +46,26 @@ function statusClass(status) {
   return 'upcoming';
 }
 
+function computePayloadRenderKey(payload) {
+  if (!payload?.matchups?.length) {
+    return 'empty';
+  }
+
+  return payload.matchups
+    .map((matchup) => [
+      matchup.id,
+      matchup.status,
+      matchup.teamA?.key,
+      matchup.teamA?.points,
+      matchup.teamB?.key,
+      matchup.teamB?.points,
+      matchup.isClosest ? 1 : 0,
+      matchup.isUpset ? 1 : 0,
+      matchup.isGameOfWeek ? 1 : 0
+    ].join('|'))
+    .join('||');
+}
+
 function parseQueryOverrides(settings) {
   const params = new URLSearchParams(window.location.search);
   const override = JSON.parse(JSON.stringify(settings));
@@ -78,6 +99,10 @@ function setBodyClasses(settings) {
 
   if (settings.overlay.layout === 'compact' || settings.theme.compact) {
     document.body.classList.add('compact');
+  }
+
+  if (settings.security?.reducedAnimations) {
+    document.body.classList.add('reduced-motion');
   }
 }
 
@@ -127,6 +152,7 @@ function renderTdEvents(tdEvents = []) {
   }
 
   const duration = Number(state.settings.overlay.tdAlertDurationMs || 8000);
+  const reducedMotion = Boolean(state.settings?.security?.reducedAnimations);
 
   for (const event of tdEvents) {
     const card = document.createElement('article');
@@ -153,17 +179,25 @@ function renderTdEvents(tdEvents = []) {
       container.removeChild(container.lastElementChild);
     }
 
-    requestAnimationFrame(() => {
+    if (reducedMotion) {
       card.classList.add('show');
-    });
+    } else {
+      requestAnimationFrame(() => {
+        card.classList.add('show');
+      });
+    }
 
     const hideTimer = setTimeout(() => {
-      card.classList.remove('show');
-      card.classList.add('hide');
-      const removeTimer = setTimeout(() => {
+      if (reducedMotion) {
         card.remove();
-      }, 360);
-      state.tdAlertTimers.push(removeTimer);
+      } else {
+        card.classList.remove('show');
+        card.classList.add('hide');
+        const removeTimer = setTimeout(() => {
+          card.remove();
+        }, 360);
+        state.tdAlertTimers.push(removeTimer);
+      }
     }, duration);
 
     state.tdAlertTimers.push(hideTimer);
@@ -388,7 +422,12 @@ function startRotation() {
 }
 
 function onPayloadUpdate(payload, scoreChanges = [], tdEvents = []) {
+  const previousRenderKey = state.payloadRenderKey;
+  const nextRenderKey = computePayloadRenderKey(payload);
+  const shouldRender = !state.payload || previousRenderKey !== nextRenderKey || scoreChanges.length > 0;
+
   state.payload = payload;
+  state.payloadRenderKey = nextRenderKey;
 
   const length = state.payload?.matchups?.length || 0;
   if (state.activeIndex >= length) {
@@ -405,7 +444,10 @@ function onPayloadUpdate(payload, scoreChanges = [], tdEvents = []) {
     }
   }
 
-  render();
+  if (shouldRender) {
+    render();
+  }
+
   renderTdEvents(tdEvents);
   startRotation();
 }

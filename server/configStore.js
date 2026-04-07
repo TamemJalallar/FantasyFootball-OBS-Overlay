@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { deepClone, deepMerge, clampNumber } = require('./utils');
 const { DEFAULT_SETTINGS } = require('./defaultSettings');
+const { getSecret, setSecret } = require('./secretStore');
 
 const SETTINGS_PATH = path.resolve(process.cwd(), 'config', 'settings.json');
 
@@ -10,12 +11,17 @@ function envBool(value) {
 }
 
 function applyValidation(settings) {
-  settings.data.refreshIntervalMs = clampNumber(settings.data.refreshIntervalMs, 15000, 900000, 45000);
-  settings.data.maxRetryDelayMs = clampNumber(settings.data.maxRetryDelayMs, 30000, 1800000, 300000);
+  settings.data.refreshIntervalMs = clampNumber(settings.data.refreshIntervalMs, 5000, 900000, 10000);
+  settings.data.scoreboardPollMs = clampNumber(settings.data.scoreboardPollMs, 5000, 900000, settings.data.refreshIntervalMs || 10000);
+  settings.data.tdScanIntervalMs = clampNumber(settings.data.tdScanIntervalMs, 5000, 900000, settings.data.refreshIntervalMs || 10000);
+  settings.data.maxRetryDelayMs = clampNumber(settings.data.maxRetryDelayMs, 15000, 1800000, 300000);
+
   settings.overlay.rotationIntervalMs = clampNumber(settings.overlay.rotationIntervalMs, 3000, 120000, 9000);
   settings.overlay.tdAlertDurationMs = clampNumber(settings.overlay.tdAlertDurationMs, 3000, 20000, 8000);
   settings.theme.fontScale = clampNumber(settings.theme.fontScale, 0.6, 2, 1);
+
   settings.overlay.showTdAlerts = Boolean(settings.overlay.showTdAlerts);
+  settings.security.reducedAnimations = Boolean(settings.security.reducedAnimations);
 
   settings.overlay.mode = settings.overlay.mode === 'ticker' ? 'ticker' : 'carousel';
   settings.overlay.layout = settings.overlay.layout === 'compact' ? 'compact' : 'full';
@@ -30,14 +36,22 @@ function applyValidation(settings) {
     settings.league.week = 'current';
   }
 
+  settings.security.adminApiKey = String(settings.security.adminApiKey || '').trim();
+
   return settings;
 }
 
-function applyEnvDefaults(settings) {
+async function applyEnvDefaults(settings) {
   if (process.env.YAHOO_CLIENT_ID && !settings.yahoo.clientId) {
     settings.yahoo.clientId = process.env.YAHOO_CLIENT_ID;
   }
-  if (process.env.YAHOO_CLIENT_SECRET && !settings.yahoo.clientSecret) {
+
+  const secretFromStore = await getSecret('yahooClientSecret');
+  if (secretFromStore && !settings.yahoo.clientSecret) {
+    settings.yahoo.clientSecret = secretFromStore;
+  }
+
+  if (process.env.YAHOO_CLIENT_SECRET) {
     settings.yahoo.clientSecret = process.env.YAHOO_CLIENT_SECRET;
   }
 
@@ -46,6 +60,10 @@ function applyEnvDefaults(settings) {
 
   if (process.env.MOCK_MODE !== undefined) {
     settings.data.mockMode = envBool(process.env.MOCK_MODE);
+  }
+
+  if (process.env.ADMIN_API_KEY && !settings.security.adminApiKey) {
+    settings.security.adminApiKey = process.env.ADMIN_API_KEY;
   }
 
   return settings;
@@ -72,12 +90,25 @@ async function loadSettings() {
   }
 
   const merged = deepMerge(deepClone(DEFAULT_SETTINGS), parsed);
-  return applyValidation(applyEnvDefaults(merged));
+  const withEnv = await applyEnvDefaults(merged);
+  return applyValidation(withEnv);
 }
 
 async function saveSettings(settings) {
-  const validated = applyValidation(applyEnvDefaults(deepMerge(deepClone(DEFAULT_SETTINGS), settings)));
-  await fs.writeFile(SETTINGS_PATH, `${JSON.stringify(validated, null, 2)}\n`, 'utf8');
+  const merged = deepMerge(deepClone(DEFAULT_SETTINGS), settings);
+  const withEnv = await applyEnvDefaults(merged);
+  const validated = applyValidation(withEnv);
+
+  if (validated.yahoo.clientSecret && validated.yahoo.clientSecret !== '********') {
+    await setSecret('yahooClientSecret', validated.yahoo.clientSecret);
+  }
+
+  const persistable = deepClone(validated);
+  if (persistable.yahoo.clientSecret) {
+    persistable.yahoo.clientSecret = '';
+  }
+
+  await fs.writeFile(SETTINGS_PATH, `${JSON.stringify(persistable, null, 2)}\n`, 'utf8');
   return validated;
 }
 
@@ -93,7 +124,21 @@ function redactSecrets(settings) {
   if (cloned.yahoo.clientSecret) {
     cloned.yahoo.clientSecret = '********';
   }
+
+  if (cloned.security.adminApiKey) {
+    cloned.security.adminApiKey = '********';
+  }
+
   return cloned;
+}
+
+async function getAdminApiKey() {
+  if (process.env.ADMIN_API_KEY) {
+    return process.env.ADMIN_API_KEY;
+  }
+
+  const settings = await loadSettings();
+  return settings.security.adminApiKey || '';
 }
 
 module.exports = {
@@ -101,5 +146,6 @@ module.exports = {
   loadSettings,
   saveSettings,
   updateSettings,
-  redactSecrets
+  redactSecrets,
+  getAdminApiKey
 };

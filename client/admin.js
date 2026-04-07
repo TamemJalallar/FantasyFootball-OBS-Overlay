@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
+const ADMIN_KEY_STORAGE = 'obs_overlay_admin_key';
+
 const state = {
   settings: null,
   status: null,
@@ -13,6 +15,22 @@ function bool(input) {
 function numberValue(input, fallback = null) {
   const value = Number(input?.value);
   return Number.isFinite(value) ? value : fallback;
+}
+
+function getAdminKey() {
+  return ($('adminApiKeyInput')?.value || localStorage.getItem(ADMIN_KEY_STORAGE) || '').trim();
+}
+
+function withAdminHeaders(headers = {}) {
+  const key = getAdminKey();
+  if (key) {
+    return {
+      ...headers,
+      'x-admin-key': key
+    };
+  }
+
+  return headers;
 }
 
 function setPill(id, label, ok) {
@@ -34,7 +52,7 @@ function updateStatusLine() {
     : 'never';
 
   if (state.status.lastError) {
-    statusLine.textContent = `Last sync failed at ${new Date(state.status.lastError.at).toLocaleTimeString()}: ${state.status.lastError.message}`;
+    statusLine.textContent = `Last sync failed at ${new Date(state.status.lastError.at).toLocaleTimeString()} (${state.status.lastError.phase || 'unknown'}): ${state.status.lastError.message}`;
     return;
   }
 
@@ -81,6 +99,8 @@ function fillForm(settings) {
   }
 
   $('refreshIntervalMs').value = settings.data.refreshIntervalMs;
+  $('scoreboardPollMs').value = settings.data.scoreboardPollMs || settings.data.refreshIntervalMs || 10000;
+  $('tdScanIntervalMs').value = settings.data.tdScanIntervalMs || settings.data.refreshIntervalMs || 10000;
   $('maxRetryDelayMs').value = settings.data.maxRetryDelayMs;
   $('mockMode').checked = Boolean(settings.data.mockMode);
 
@@ -103,6 +123,9 @@ function fillForm(settings) {
   $('tdAlertDurationMs').value = settings.overlay.tdAlertDurationMs || 8000;
   $('highlightClosest').checked = Boolean(settings.overlay.highlightClosest);
   $('highlightUpset').checked = Boolean(settings.overlay.highlightUpset);
+  if (!$('adminApiKeyInput').value.trim() && settings.security?.adminApiKey) {
+    $('adminApiKeyInput').value = settings.security.adminApiKey;
+  }
 
   $('gameOfWeekMatchupId').value = settings.overlay.gameOfWeekMatchupId || '';
   $('soundHookUrl').value = settings.overlay.soundHookUrl || '';
@@ -113,6 +136,8 @@ function fillForm(settings) {
   $('mutedTextColor').value = settings.theme.mutedText || '#aab3ca';
   $('bgColor').value = settings.theme.background || 'rgba(8, 12, 24, 0.72)';
 
+  $('reducedAnimations').value = String(Boolean(settings.security?.reducedAnimations));
+
   applyThemePreview();
 }
 
@@ -120,12 +145,14 @@ function collectForm() {
   let overrides;
   try {
     overrides = JSON.parse($('teamOverrides').value || '{}');
-  } catch (error) {
+  } catch {
     throw new Error('Team overrides must be valid JSON.');
   }
 
   const weekMode = $('weekMode').value;
   const week = weekMode === 'current' ? 'current' : numberValue($('weekNumber'), 1);
+
+  const adminKey = $('adminApiKeyInput').value.trim();
 
   return {
     yahoo: {
@@ -142,7 +169,9 @@ function collectForm() {
       teamNameOverrides: overrides
     },
     data: {
-      refreshIntervalMs: numberValue($('refreshIntervalMs'), 45000),
+      refreshIntervalMs: numberValue($('refreshIntervalMs'), 10000),
+      scoreboardPollMs: numberValue($('scoreboardPollMs'), 10000),
+      tdScanIntervalMs: numberValue($('tdScanIntervalMs'), 10000),
       maxRetryDelayMs: numberValue($('maxRetryDelayMs'), 300000),
       mockMode: bool($('mockMode'))
     },
@@ -175,20 +204,40 @@ function collectForm() {
     },
     dev: {
       showUpdatedIndicator: bool($('showUpdatedIndicator'))
+    },
+    security: {
+      adminApiKey: adminKey,
+      reducedAnimations: $('reducedAnimations').value === 'true'
     }
   };
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: withAdminHeaders(options.headers || {})
+  });
+
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(body.message || body.detail || `Request failed (${response.status})`);
   }
+
   return body;
 }
 
+function notify(nodeId, message, ok = true) {
+  const node = $(nodeId);
+  node.textContent = message;
+  node.style.color = ok ? '#88ffe0' : '#ff9cad';
+}
+
 async function load() {
+  const rememberedKey = localStorage.getItem(ADMIN_KEY_STORAGE) || '';
+  if (rememberedKey) {
+    $('adminApiKeyInput').value = rememberedKey;
+  }
+
   const [{ settings }, statusPayload] = await Promise.all([
     fetchJson('/api/config'),
     fetchJson('/api/status')
@@ -203,6 +252,23 @@ async function load() {
 
   const overlayUrl = `${window.location.origin}/overlay`;
   $('overlayUrl').value = overlayUrl;
+  renderPresetLinks(overlayUrl);
+}
+
+function renderPresetLinks(base) {
+  const node = $('presetLinks');
+  const links = [
+    { label: 'Centered Card', url: `${base}?preset=centered-card` },
+    { label: 'Lower Third', url: `${base}?preset=lower-third` },
+    { label: 'Sidebar Widget', url: `${base}?preset=sidebar-widget` },
+    { label: 'Bottom Ticker', url: `${base}?preset=bottom-ticker` },
+    { label: 'Ticker Mode', url: `${base}?mode=ticker` },
+    { label: 'Two-Up Sidebar', url: `${base}?preset=sidebar-widget&twoUp=1&scale=0.95` }
+  ];
+
+  node.innerHTML = links
+    .map((link) => `<div><strong>${link.label}:</strong> <a href="${link.url}" target="_blank" rel="noreferrer">${link.url}</a></div>`)
+    .join('');
 }
 
 function refreshAuthPills() {
@@ -246,12 +312,6 @@ async function refreshStatus() {
   updateStatusLine();
 }
 
-function notify(nodeId, message, ok = true) {
-  const node = $(nodeId);
-  node.textContent = message;
-  node.style.color = ok ? '#88ffe0' : '#ff9cad';
-}
-
 async function testConnection() {
   notify('testResult', 'Testing API connection...');
 
@@ -289,6 +349,43 @@ async function logoutTokens() {
   await refreshStatus();
 }
 
+async function exportConfig() {
+  const response = await fetch('/api/config/export', {
+    headers: withAdminHeaders({})
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.message || `Export failed (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'overlay-config.export.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importConfigFromFile(file) {
+  const raw = await file.text();
+  const payload = JSON.parse(raw);
+
+  const result = await fetchJson('/api/config/import', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  fillForm(result.settings);
+  await refreshStatus();
+}
+
 function bindEvents() {
   $('weekMode').addEventListener('change', (event) => {
     setWeekMode(event.target.value, numberValue($('weekNumber'), 1));
@@ -320,6 +417,12 @@ function bindEvents() {
   });
 
   $('oauthStartBtn').addEventListener('click', () => {
+    const key = getAdminKey();
+    if (key) {
+      window.location.href = `/auth/start?adminKey=${encodeURIComponent(key)}`;
+      return;
+    }
+
     window.location.href = '/auth/start';
   });
 
@@ -333,6 +436,47 @@ function bindEvents() {
       notify('testResult', 'Overlay URL copied to clipboard.', true);
     } catch {
       notify('testResult', 'Clipboard copy failed. Copy manually.', false);
+    }
+  });
+
+  $('rememberAdminKeyBtn').addEventListener('click', () => {
+    const key = $('adminApiKeyInput').value.trim();
+    if (!key) {
+      notify('testResult', 'Enter an admin key first.', false);
+      return;
+    }
+
+    localStorage.setItem(ADMIN_KEY_STORAGE, key);
+    notify('testResult', 'Admin key remembered in browser.', true);
+  });
+
+  $('clearAdminKeyBtn').addEventListener('click', () => {
+    localStorage.removeItem(ADMIN_KEY_STORAGE);
+    $('adminApiKeyInput').value = '';
+    notify('testResult', 'Remembered admin key cleared.', true);
+  });
+
+  $('exportConfigBtn').addEventListener('click', () => {
+    exportConfig().catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('importConfigBtn').addEventListener('click', () => {
+    $('importConfigFile').click();
+  });
+
+  $('importConfigFile').addEventListener('change', async (event) => {
+    const [file] = event.target.files || [];
+    if (!file) {
+      return;
+    }
+
+    try {
+      await importConfigFromFile(file);
+      notify('testResult', 'Config imported successfully.', true);
+    } catch (error) {
+      notify('testResult', `Import failed: ${error.message}`, false);
+    } finally {
+      event.target.value = '';
     }
   });
 }

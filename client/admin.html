@@ -17,8 +17,31 @@
         <div class="topbar-actions">
           <button id="saveBtn" class="btn primary">Save Settings</button>
           <button id="refreshBtn" class="btn ghost">Force Refresh</button>
+          <button id="exportConfigBtn" class="btn ghost">Export Config</button>
+          <button id="importConfigBtn" class="btn ghost">Import Config</button>
+          <input id="importConfigFile" type="file" accept="application/json" class="hidden-input" />
         </div>
       </header>
+
+      <section class="panel">
+        <h2>Admin Access</h2>
+        <p class="subtle">Optional local API key gate. If configured, enter key to unlock admin actions.</p>
+        <div class="row split">
+          <label>Admin API Key
+            <input id="adminApiKeyInput" type="password" autocomplete="off" placeholder="x-admin-key" />
+          </label>
+          <label>Reduced Animation Mode
+            <select id="reducedAnimations">
+              <option value="false">Normal Motion</option>
+              <option value="true">Reduced Motion</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <button id="rememberAdminKeyBtn" class="btn ghost">Remember Key In Browser</button>
+          <button id="clearAdminKeyBtn" class="btn ghost">Clear Remembered Key</button>
+        </div>
+      </section>
 
       <main class="grid">
         <section class="panel">
@@ -83,10 +106,19 @@
 
           <div class="row split">
             <label>Refresh Interval (ms)
-              <input id="refreshIntervalMs" type="number" min="15000" step="1000" />
+              <input id="refreshIntervalMs" type="number" min="5000" step="1000" />
             </label>
             <label>Max Retry Delay (ms)
-              <input id="maxRetryDelayMs" type="number" min="30000" step="1000" />
+              <input id="maxRetryDelayMs" type="number" min="15000" step="1000" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label>Scoreboard Poll (ms)
+              <input id="scoreboardPollMs" type="number" min="5000" step="1000" />
+            </label>
+            <label>TD Scan Poll (ms)
+              <input id="tdScanIntervalMs" type="number" min="5000" step="1000" />
             </label>
           </div>
 
@@ -215,6 +247,8 @@
             <a class="btn ghost" href="/overlay" target="_blank" rel="noreferrer">Open Overlay Preview</a>
             <button id="copyOverlayBtn" class="btn ghost">Copy URL</button>
           </div>
+
+          <div class="preset-links" id="presetLinks"></div>
 
           <p class="hint">
             Recommended OBS settings: width <code>1920</code>, height <code>1080</code>, enable <code>Shutdown source when not visible</code>, and refresh browser when scene becomes active.

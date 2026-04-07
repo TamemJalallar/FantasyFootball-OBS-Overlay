@@ -13,7 +13,9 @@ const DEFAULT_SETTINGS = {
     scope: 'fspt-r'
   },
   data: {
-    refreshIntervalMs: 45000,
+    refreshIntervalMs: 10000,
+    scoreboardPollMs: 10000,
+    tdScanIntervalMs: 10000,
     maxRetryDelayMs: 300000,
     useCacheOnFailure: true,
     mockMode: true
@@ -48,6 +50,10 @@ const DEFAULT_SETTINGS = {
   dev: {
     showUpdatedIndicator: true,
     verboseLogs: false
+  },
+  security: {
+    adminApiKey: '',
+    reducedAnimations: false
   }
 };
 

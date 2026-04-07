@@ -7,3 +7,4 @@ cache/*.json
 !cache/.gitkeep
 config/tokens.json
 config/settings.local.json
+config/secrets.json

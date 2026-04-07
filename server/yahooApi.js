@@ -12,9 +12,10 @@ function withTimeout(ms = 12_000) {
 }
 
 class YahooApiClient {
-  constructor({ logger, authService }) {
+  constructor({ logger, authService, metrics = null }) {
     this.logger = logger;
     this.authService = authService;
+    this.metrics = metrics;
     this.parser = new XMLParser({
       ignoreAttributes: true,
       parseTagValue: false,
@@ -23,6 +24,7 @@ class YahooApiClient {
   }
 
   async request(pathWithParams) {
+    const startedAt = Date.now();
     const accessToken = await this.authService.refreshAccessTokenIfNeeded();
     if (!accessToken) {
       throw new Error('Not authorized with Yahoo yet. Complete OAuth in /admin.');
@@ -46,8 +48,11 @@ class YahooApiClient {
         throw new Error(`Yahoo API request failed: ${message}`);
       }
 
+      this.metrics?.inc('yahoo_requests_total');
+      this.metrics?.set('yahoo_last_request_duration_ms', Date.now() - startedAt);
       return this.parser.parse(text);
     } catch (error) {
+      this.metrics?.inc('yahoo_requests_failed_total');
       this.logger.warn('Yahoo API request failed', { pathWithParams, error: error.message });
       throw error;
     } finally {
