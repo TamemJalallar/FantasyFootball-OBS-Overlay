@@ -188,6 +188,12 @@ function fillForm(settings) {
   $('adaptiveLiveMs').value = settings.data.adaptivePolling?.liveMs ?? 10000;
   $('adaptiveMixedMs').value = settings.data.adaptivePolling?.mixedMs ?? 20000;
   $('adaptiveIdleMs').value = settings.data.adaptivePolling?.idleMs ?? 45000;
+  $('scheduleAwareEnabled').checked = Boolean(settings.data.scheduleAware?.enabled);
+  $('scheduleTimezone').value = settings.data.scheduleAware?.timezone || 'America/New_York';
+  $('scheduleStartHour').value = settings.data.scheduleAware?.gameWindowStartHour ?? 9;
+  $('scheduleEndHour').value = settings.data.scheduleAware?.gameWindowEndHour ?? 24;
+  $('scheduleOffHoursScoreboardMs').value = settings.data.scheduleAware?.offHoursScoreboardMs ?? 60000;
+  $('scheduleOffHoursTdMs').value = settings.data.scheduleAware?.offHoursTdMs ?? 60000;
 
   $('circuitEnabled').checked = Boolean(settings.data.circuitBreaker?.enabled);
   $('circuitFailureThreshold').value = settings.data.circuitBreaker?.failureThreshold ?? 4;
@@ -196,6 +202,8 @@ function fillForm(settings) {
 
   $('historyEnabled').checked = Boolean(settings.data.history?.enabled);
   $('historyRetentionDays').value = settings.data.history?.retentionDays ?? 14;
+  $('safeModeEnabled').checked = Boolean(settings.data.safeMode?.enabled);
+  $('safeModeFallbackToMock').checked = Boolean(settings.data.safeMode?.fallbackToMock);
 
   $('mockMode').checked = Boolean(settings.data.mockMode);
   $('teamOverrides').value = JSON.stringify(settings.league.teamNameOverrides || {}, null, 2);
@@ -216,6 +224,10 @@ function fillForm(settings) {
   $('showTicker').checked = Boolean(settings.overlay.showTicker);
   $('showTdAlerts').checked = Boolean(settings.overlay.showTdAlerts);
   $('showScoreDelta').checked = Boolean(settings.overlay.showScoreDelta);
+  $('autoRedzoneEnabled').checked = Boolean(settings.overlay.autoRedzone?.enabled);
+  $('autoRedzoneLockMs').value = settings.overlay.autoRedzone?.lockMs ?? 25000;
+  $('storyCardsEnabled').checked = Boolean(settings.overlay.storyCards?.enabled);
+  $('storyCardsInterval').value = settings.overlay.storyCards?.interval ?? 2;
   $('tdAlertDurationMs').value = settings.overlay.tdAlertDurationMs || 8000;
   $('highlightClosest').checked = Boolean(settings.overlay.highlightClosest);
   $('highlightUpset').checked = Boolean(settings.overlay.highlightUpset);
@@ -291,6 +303,14 @@ function collectForm() {
         mixedMs: numberValue($('adaptiveMixedMs'), 20000),
         idleMs: numberValue($('adaptiveIdleMs'), 45000)
       },
+      scheduleAware: {
+        enabled: bool($('scheduleAwareEnabled')),
+        timezone: $('scheduleTimezone').value.trim() || 'America/New_York',
+        gameWindowStartHour: numberValue($('scheduleStartHour'), 9),
+        gameWindowEndHour: numberValue($('scheduleEndHour'), 24),
+        offHoursScoreboardMs: numberValue($('scheduleOffHoursScoreboardMs'), 60000),
+        offHoursTdMs: numberValue($('scheduleOffHoursTdMs'), 60000)
+      },
       circuitBreaker: {
         enabled: bool($('circuitEnabled')),
         failureThreshold: numberValue($('circuitFailureThreshold'), 4),
@@ -300,6 +320,10 @@ function collectForm() {
       history: {
         enabled: bool($('historyEnabled')),
         retentionDays: numberValue($('historyRetentionDays'), 14)
+      },
+      safeMode: {
+        enabled: bool($('safeModeEnabled')),
+        fallbackToMock: bool($('safeModeFallbackToMock'))
       },
       mockMode: bool($('mockMode'))
     },
@@ -315,6 +339,14 @@ function collectForm() {
       showTicker: bool($('showTicker')),
       showTdAlerts: bool($('showTdAlerts')),
       showScoreDelta: bool($('showScoreDelta')),
+      autoRedzone: {
+        enabled: bool($('autoRedzoneEnabled')),
+        lockMs: numberValue($('autoRedzoneLockMs'), 25000)
+      },
+      storyCards: {
+        enabled: bool($('storyCardsEnabled')),
+        interval: numberValue($('storyCardsInterval'), 2)
+      },
       tdAlertDurationMs: numberValue($('tdAlertDurationMs'), 8000),
       highlightClosest: bool($('highlightClosest')),
       highlightUpset: bool($('highlightUpset')),
@@ -416,18 +448,51 @@ async function load() {
 
 function renderPresetLinks(base) {
   const node = $('presetLinks');
+  const origin = window.location.origin;
   const links = [
-    { label: 'Centered Card', url: `${base}?preset=centered-card` },
-    { label: 'Lower Third', url: `${base}?preset=lower-third` },
-    { label: 'Sidebar Widget', url: `${base}?preset=sidebar-widget` },
-    { label: 'Bottom Ticker', url: `${base}?preset=bottom-ticker` },
-    { label: 'Ticker Mode', url: `${base}?mode=ticker` },
+    { label: 'Centered Card', url: `${origin}/overlay/centered-card` },
+    { label: 'Lower Third', url: `${origin}/overlay/lower-third` },
+    { label: 'Sidebar Widget', url: `${origin}/overlay/sidebar-widget` },
+    { label: 'Bottom Ticker', url: `${origin}/overlay/bottom-ticker` },
+    { label: 'Ticker Mode', url: `${origin}/overlay/ticker` },
     { label: 'Two-Up Sidebar', url: `${base}?preset=sidebar-widget&twoUp=1&scale=0.95` }
   ];
 
   node.innerHTML = links
     .map((link) => `<div><strong>${link.label}:</strong> <a href="${link.url}" target="_blank" rel="noreferrer">${link.url}</a></div>`)
     .join('');
+}
+
+function formatMsCompact(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) {
+    return '--';
+  }
+
+  if (value < 1000) {
+    return `${Math.round(value)} ms`;
+  }
+
+  const seconds = value / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)} s`;
+  }
+
+  const minutes = seconds / 60;
+  return `${minutes.toFixed(1)} m`;
+}
+
+function renderHealthTiles(diagnostics) {
+  const counters = diagnostics?.metrics?.counters || {};
+  const gauges = diagnostics?.metrics?.gauges || {};
+  const status = diagnostics?.status || {};
+
+  $('healthApiLatency').textContent = formatMsCompact(gauges.yahoo_last_request_duration_ms);
+  $('healthYahooErrors').textContent = String(counters.yahoo_requests_failed_total || 0);
+  $('healthCircuitTrips').textContent = String(status.circuitTripCount || counters.circuit_breaker_open_total || 0);
+  $('healthSseClients').textContent = String(gauges.sse_clients_connected || 0);
+  $('healthNextScorePoll').textContent = formatMsCompact(status.nextScoreboardDelayMs);
+  $('healthNextTdPoll').textContent = formatMsCompact(status.nextTdDelayMs);
 }
 
 function refreshAuthPills() {
@@ -475,6 +540,7 @@ async function refreshStatus() {
 async function refreshDiagnostics() {
   const payload = await fetchJson('/api/diagnostics?hours=24');
   state.diagnostics = payload.diagnostics;
+  renderHealthTiles(payload.diagnostics);
 
   const output = {
     status: payload.diagnostics.status,
@@ -542,6 +608,27 @@ async function exportConfig() {
   const a = document.createElement('a');
   a.href = url;
   a.download = 'overlay-config.export.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportHistory(format = 'json') {
+  const response = await fetch(`/api/history/export?format=${encodeURIComponent(format)}&hours=168`, {
+    headers: withAdminHeaders({})
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.message || `History export failed (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = format === 'csv' ? 'matchup-timeline.csv' : 'matchup-timeline.json';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -755,6 +842,14 @@ function bindEvents() {
 
   $('refreshDiagnosticsBtn').addEventListener('click', () => {
     refreshDiagnostics().catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('exportHistoryJsonBtn').addEventListener('click', () => {
+    exportHistory('json').catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('exportHistoryCsvBtn').addEventListener('click', () => {
+    exportHistory('csv').catch((error) => notify('testResult', error.message, false));
   });
 
   state.statusTimer = setInterval(() => {

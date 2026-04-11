@@ -24,6 +24,30 @@ function applyValidation(settings) {
   settings.data.adaptivePolling.mixedMs = clampNumber(settings.data.adaptivePolling.mixedMs, 5000, 900000, 20000);
   settings.data.adaptivePolling.idleMs = clampNumber(settings.data.adaptivePolling.idleMs, 10000, 1800000, 45000);
 
+  settings.data.scheduleAware = settings.data.scheduleAware || {};
+  settings.data.scheduleAware.enabled = Boolean(settings.data.scheduleAware.enabled);
+  settings.data.scheduleAware.timezone = String(settings.data.scheduleAware.timezone || '').trim() || 'America/New_York';
+
+  const gameDays = Array.isArray(settings.data.scheduleAware.gameDays)
+    ? settings.data.scheduleAware.gameDays
+    : ['thu', 'sun', 'mon'];
+  settings.data.scheduleAware.gameDays = [...new Set(gameDays
+    .map((day) => String(day || '').trim().slice(0, 3).toLowerCase())
+    .filter(Boolean))]
+    .slice(0, 7);
+  if (!settings.data.scheduleAware.gameDays.length) {
+    settings.data.scheduleAware.gameDays = ['thu', 'sun', 'mon'];
+  }
+
+  settings.data.scheduleAware.gameWindowStartHour = clampNumber(settings.data.scheduleAware.gameWindowStartHour, 0, 23, 9);
+  settings.data.scheduleAware.gameWindowEndHour = clampNumber(settings.data.scheduleAware.gameWindowEndHour, 1, 24, 24);
+  settings.data.scheduleAware.offHoursScoreboardMs = clampNumber(settings.data.scheduleAware.offHoursScoreboardMs, 15000, 1800000, 60000);
+  settings.data.scheduleAware.offHoursTdMs = clampNumber(settings.data.scheduleAware.offHoursTdMs, 15000, 1800000, 60000);
+
+  settings.data.safeMode = settings.data.safeMode || {};
+  settings.data.safeMode.enabled = Boolean(settings.data.safeMode.enabled);
+  settings.data.safeMode.fallbackToMock = Boolean(settings.data.safeMode.fallbackToMock);
+
   settings.data.circuitBreaker = settings.data.circuitBreaker || {};
   settings.data.circuitBreaker.enabled = Boolean(settings.data.circuitBreaker.enabled);
   settings.data.circuitBreaker.failureThreshold = clampNumber(settings.data.circuitBreaker.failureThreshold, 2, 20, 4);
@@ -40,6 +64,12 @@ function applyValidation(settings) {
 
   settings.overlay.showTdAlerts = Boolean(settings.overlay.showTdAlerts);
   settings.overlay.showScoreDelta = Boolean(settings.overlay.showScoreDelta);
+  settings.overlay.autoRedzone = settings.overlay.autoRedzone || {};
+  settings.overlay.autoRedzone.enabled = Boolean(settings.overlay.autoRedzone.enabled);
+  settings.overlay.autoRedzone.lockMs = clampNumber(settings.overlay.autoRedzone.lockMs, 5000, 120000, 25000);
+  settings.overlay.storyCards = settings.overlay.storyCards || {};
+  settings.overlay.storyCards.enabled = Boolean(settings.overlay.storyCards.enabled);
+  settings.overlay.storyCards.interval = clampNumber(settings.overlay.storyCards.interval, 1, 6, 2);
   settings.security.reducedAnimations = Boolean(settings.security.reducedAnimations);
   settings.security.useOsKeychain = Boolean(settings.security.useOsKeychain);
   settings.audio.enabled = Boolean(settings.audio.enabled);

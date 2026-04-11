@@ -307,6 +307,37 @@ textarea {
   white-space: pre-wrap;
 }
 
+.health-grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.health-card {
+  margin: 0;
+  padding: 10px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(117, 134, 170, 0.28);
+  background: rgba(8, 14, 26, 0.65);
+}
+
+.health-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.health-value {
+  margin: 6px 0 0;
+  color: #dbf4ff;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 22px;
+  line-height: 1;
+}
+
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -329,5 +360,9 @@ code {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+  }
+
+  .health-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
   }
 }

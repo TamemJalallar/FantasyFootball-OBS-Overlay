@@ -12,9 +12,97 @@ const FALLBACK_TD_STATS = {
   '7': 'Receiving TD',
   '8': 'Return TD'
 };
+const DEFAULT_GAME_DAYS = ['thu', 'sun', 'mon'];
 
 function payloadHash(payload) {
   return crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+}
+
+function normalizeDayToken(day) {
+  return String(day || '').trim().slice(0, 3).toLowerCase();
+}
+
+function getScheduleParts(scheduleAware, now = new Date()) {
+  const requestedTimezone = safeString(scheduleAware?.timezone || 'America/New_York', 'America/New_York');
+  const format = (timezone) => new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short',
+    hour: '2-digit',
+    hour12: false
+  }).formatToParts(now);
+
+  let timezone = requestedTimezone;
+  let fallback = false;
+  let parts;
+
+  try {
+    parts = format(timezone);
+  } catch {
+    timezone = 'UTC';
+    fallback = true;
+    parts = format(timezone);
+  }
+
+  const weekday = normalizeDayToken(parts.find((part) => part.type === 'weekday')?.value);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value);
+
+  return {
+    timezone,
+    fallback,
+    weekday,
+    hour: Number.isFinite(hour) ? hour : 0
+  };
+}
+
+function isHourInWindow(hour, startHour, endHour) {
+  if (startHour === endHour) {
+    return true;
+  }
+  if (startHour < endHour) {
+    return hour >= startHour && hour < endHour;
+  }
+  return hour >= startHour || hour < endHour;
+}
+
+function computeScheduleWindowState(scheduleAware = {}, now = new Date()) {
+  const enabled = Boolean(scheduleAware?.enabled);
+  if (!enabled) {
+    return {
+      enabled: false,
+      active: false,
+      timezone: safeString(scheduleAware?.timezone || 'America/New_York', 'America/New_York'),
+      weekday: null,
+      hour: null,
+      isGameDay: false,
+      inWindow: false,
+      gameDays: DEFAULT_GAME_DAYS
+    };
+  }
+
+  const gameDays = (Array.isArray(scheduleAware.gameDays) ? scheduleAware.gameDays : DEFAULT_GAME_DAYS)
+    .map(normalizeDayToken)
+    .filter(Boolean);
+  const uniqueGameDays = [...new Set(gameDays.length ? gameDays : DEFAULT_GAME_DAYS)];
+  const startHour = Math.max(0, Math.min(23, Number(scheduleAware.gameWindowStartHour ?? 9)));
+  const endHour = Math.max(1, Math.min(24, Number(scheduleAware.gameWindowEndHour ?? 24)));
+
+  const parts = getScheduleParts(scheduleAware, now);
+  const isGameDay = uniqueGameDays.includes(parts.weekday);
+  const inWindow = isHourInWindow(parts.hour, startHour, endHour);
+
+  return {
+    enabled: true,
+    active: isGameDay && inWindow,
+    timezone: parts.timezone,
+    timezoneFallback: parts.fallback,
+    weekday: parts.weekday,
+    hour: parts.hour,
+    isGameDay,
+    inWindow,
+    gameDays: uniqueGameDays,
+    gameWindowStartHour: startHour,
+    gameWindowEndHour: endHour
+  };
 }
 
 function getIn(obj, path, fallback = null) {
@@ -282,6 +370,7 @@ function computeTdEventsFromStates({ previousState, currentState, teamMeta, tdSt
     }
 
     const team = teamMeta[current.teamKey] || {};
+    const playerPointDelta = Number((Number(current.points || 0) - Number(previous?.points || 0)).toFixed(2));
 
     tdEvents.push({
       id: `${nowMs}-${current.playerKey}`,
@@ -295,11 +384,43 @@ function computeTdEventsFromStates({ previousState, currentState, teamMeta, tdSt
       touchdownDelta: Number((current.totalTouchdowns - prevTotal).toFixed(2)),
       totalTouchdowns: current.totalTouchdowns,
       playerPoints: current.points,
+      playerPointDelta,
       tdTypes: changedTypes.length ? changedTypes : current.tdTypes
     });
   }
 
   return tdEvents;
+}
+
+function computePlayerScoreChangesFromStates({ previousState, currentState, teamMeta, now = new Date() }) {
+  const rows = [];
+  const nowIso = now.toISOString();
+
+  for (const [snapshotKey, current] of currentState.entries()) {
+    const previous = previousState.get(snapshotKey);
+    const previousPoints = Number(previous?.points || 0);
+    const currentPoints = Number(current?.points || 0);
+    const delta = Number((currentPoints - previousPoints).toFixed(2));
+    if (!delta) {
+      continue;
+    }
+
+    const team = teamMeta[current.teamKey] || {};
+    rows.push({
+      ts: nowIso,
+      playerKey: current.playerKey,
+      playerName: current.playerName,
+      fantasyTeamKey: current.teamKey,
+      fantasyTeamName: team.teamName || 'Fantasy Team',
+      matchupId: team.matchupId || null,
+      from: previousPoints,
+      to: currentPoints,
+      delta
+    });
+  }
+
+  rows.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return rows;
 }
 
 class DataService {
@@ -356,7 +477,11 @@ class DataService {
     this.recentUpsetEvents = [];
     this.recentFinalEvents = [];
     this.recentTdEvents = [];
+    this.recentPlayerScoreChanges = [];
     this.lastScoreChanges = [];
+    this.scheduleWindowState = null;
+    this.nextScoreboardDelayMs = null;
+    this.nextTdDelayMs = null;
   }
 
   async init() {
@@ -447,7 +572,10 @@ class DataService {
       circuitOpenUntil: this.circuit.openUntil,
       circuitReason: this.circuit.reason,
       circuitTripCount: this.circuit.tripCount,
-      skippedPolls: this.circuit.skippedPolls
+      skippedPolls: this.circuit.skippedPolls,
+      scheduleWindow: this.scheduleWindowState,
+      nextScoreboardDelayMs: this.nextScoreboardDelayMs,
+      nextTdDelayMs: this.nextTdDelayMs
     };
   }
 
@@ -468,6 +596,7 @@ class DataService {
       recentUpsetEvents: this.recentUpsetEvents.slice(0, 40),
       recentFinalEvents: this.recentFinalEvents.slice(0, 40),
       recentTdEvents: this.recentTdEvents.slice(0, 40),
+      recentPlayerScoreChanges: this.recentPlayerScoreChanges.slice(0, 40),
       lastScoreChanges: this.lastScoreChanges.slice(0, 40),
       history: {
         snapshots: this.historyStore?.recentSnapshots({ hours: h, limit: 30 }) || [],
@@ -598,10 +727,6 @@ class DataService {
         }
       }
 
-      if (totalTouchdowns <= 0) {
-        continue;
-      }
-
       snapshots.push({
         playerKey,
         playerName,
@@ -646,7 +771,10 @@ class DataService {
 
   async detectTouchdownEvents(payload, settings) {
     if (!settings.overlay.showTdAlerts) {
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
 
     if (payload?.league?.source !== 'yahoo') {
@@ -654,24 +782,36 @@ class DataService {
       this.playerTdLeagueKey = null;
       this.playerTdWeek = null;
       await this.persistTdState();
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
 
     const liveMatchups = (payload?.matchups || []).filter((matchup) => matchup.isLive);
     if (!liveMatchups.length) {
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
 
     const leagueKey = safeString(payload?.league?.leagueKey, '');
     const week = Number(payload?.league?.week || 0);
 
     if (!leagueKey || !week) {
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
 
     const { tdStatIds, tdStatLabels } = await this.resolveTouchdownStatConfig(leagueKey);
     if (!tdStatIds.size) {
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
 
     const teamKeys = uniqueTeamKeys(payload, { liveOnly: true });
@@ -699,8 +839,18 @@ class DataService {
       this.playerTdWeek = week;
       this.playerTdState = currentState;
       await this.persistTdState();
-      return [];
+      return {
+        tdEvents: [],
+        playerScoreChanges: []
+      };
     }
+
+    const playerScoreChanges = computePlayerScoreChangesFromStates({
+      previousState: this.playerTdState,
+      currentState,
+      teamMeta: buildTeamMetaByKey(payload),
+      now: new Date()
+    });
 
     const tdEvents = computeTdEventsFromStates({
       previousState: this.playerTdState,
@@ -715,7 +865,10 @@ class DataService {
     this.playerTdWeek = week;
     await this.persistTdState();
 
-    return this.dedupeTdEvents(tdEvents, settings.data?.tdDedupWindowMs);
+    return {
+      tdEvents: this.dedupeTdEvents(tdEvents, settings.data?.tdDedupWindowMs),
+      playerScoreChanges
+    };
   }
 
   async triggerScoreHook(scoreChanges, tdEvents, hookUrl) {
@@ -781,40 +934,78 @@ class DataService {
   getScoreboardBaseMs(settings) {
     const adaptive = settings.data?.adaptivePolling || {};
     const fallback = Number(settings.data.scoreboardPollMs || settings.data.refreshIntervalMs || 10000);
+    let base = fallback;
 
-    if (!adaptive.enabled || !this.currentPayload?.matchups?.length) {
-      return fallback;
+    if (adaptive.enabled && this.currentPayload?.matchups?.length) {
+      const liveCount = this.currentPayload.matchups.filter((item) => item.isLive).length;
+      const finalCount = this.currentPayload.matchups.filter((item) => item.isFinal).length;
+      const upcomingCount = this.currentPayload.matchups.filter((item) => item.status === 'upcoming').length;
+
+      if (liveCount > 0) {
+        base = Number(adaptive.liveMs || fallback);
+      } else if (finalCount > 0 && upcomingCount > 0) {
+        base = Number(adaptive.mixedMs || fallback);
+      } else {
+        base = Number(adaptive.idleMs || fallback);
+      }
     }
 
-    const liveCount = this.currentPayload.matchups.filter((item) => item.isLive).length;
-    const finalCount = this.currentPayload.matchups.filter((item) => item.isFinal).length;
-    const upcomingCount = this.currentPayload.matchups.filter((item) => item.status === 'upcoming').length;
-
-    if (liveCount > 0) {
-      return Number(adaptive.liveMs || fallback);
-    }
-
-    if (finalCount > 0 && upcomingCount > 0) {
-      return Number(adaptive.mixedMs || fallback);
-    }
-
-    return Number(adaptive.idleMs || fallback);
+    return this.applyScheduleAwareDelay({
+      kind: 'scoreboard',
+      baseMs: base,
+      settings
+    });
   }
 
   getTdBaseMs(settings) {
     const adaptive = settings.data?.adaptivePolling || {};
     const fallback = Number(settings.data.tdScanIntervalMs || settings.data.refreshIntervalMs || 10000);
+    let base = fallback;
 
-    if (!adaptive.enabled || !this.currentPayload?.matchups?.length) {
-      return fallback;
+    if (adaptive.enabled && this.currentPayload?.matchups?.length) {
+      const liveCount = this.currentPayload.matchups.filter((item) => item.isLive).length;
+      if (liveCount > 0) {
+        base = Number(adaptive.liveMs || fallback);
+      } else {
+        base = Number(adaptive.idleMs || fallback);
+      }
     }
 
-    const liveCount = this.currentPayload.matchups.filter((item) => item.isLive).length;
-    if (liveCount > 0) {
-      return Number(adaptive.liveMs || fallback);
+    return this.applyScheduleAwareDelay({
+      kind: 'td',
+      baseMs: base,
+      settings
+    });
+  }
+
+  applyScheduleAwareDelay({ kind, baseMs, settings }) {
+    const scheduleAware = settings.data?.scheduleAware || {};
+    const scheduleWindow = computeScheduleWindowState(scheduleAware, new Date());
+    const liveCount = this.currentPayload?.matchups?.filter((item) => item.isLive).length || 0;
+    const offHoursMs = kind === 'td'
+      ? Number(scheduleAware.offHoursTdMs || 60000)
+      : Number(scheduleAware.offHoursScoreboardMs || 60000);
+
+    let adjustedMs = Number(baseMs || 10000);
+    let throttled = false;
+
+    if (scheduleWindow.enabled && !scheduleWindow.active && liveCount === 0) {
+      adjustedMs = Math.max(adjustedMs, offHoursMs);
+      throttled = adjustedMs > baseMs;
     }
 
-    return Number(adaptive.idleMs || fallback);
+    this.scheduleWindowState = {
+      ...scheduleWindow,
+      kind,
+      liveCount,
+      throttled,
+      offHoursMs
+    };
+
+    this.metrics?.set('schedule_window_active', scheduleWindow.active ? 1 : 0);
+    this.metrics?.set('schedule_window_throttled', throttled ? 1 : 0);
+
+    return adjustedMs;
   }
 
   applyJitter(delayMs, settings) {
@@ -843,7 +1034,10 @@ class DataService {
       }
     }
 
-    return this.applyJitter(delay, settings);
+    const withJitter = this.applyJitter(delay, settings);
+    this.nextScoreboardDelayMs = withJitter;
+    this.metrics?.set('scoreboard_effective_delay_ms', withJitter);
+    return withJitter;
   }
 
   getTdDelayMs(settings) {
@@ -855,7 +1049,10 @@ class DataService {
       delay = Math.min(base * (2 ** this.tdFailureCount), max);
     }
 
-    return this.applyJitter(delay, settings);
+    const withJitter = this.applyJitter(delay, settings);
+    this.nextTdDelayMs = withJitter;
+    this.metrics?.set('td_effective_delay_ms', withJitter);
+    return withJitter;
   }
 
   async pollScoreboard({ forceBroadcast = false } = {}) {
@@ -921,6 +1118,7 @@ class DataService {
         this.sseHub.broadcast('update', {
           payload,
           scoreChanges,
+          playerScoreChanges: [],
           tdEvents: [],
           leadChanges,
           upsetEvents,
@@ -991,6 +1189,38 @@ class DataService {
           this.currentPayload = cached;
           this.currentHash = payloadHash(cached);
           this.logger.warn('Fallback to cached payload after scoreboard failure');
+          this.sseHub.broadcast('update', {
+            payload: this.currentPayload,
+            scoreChanges: [],
+            playerScoreChanges: [],
+            tdEvents: [],
+            leadChanges: [],
+            upsetEvents: [],
+            finalEvents: [],
+            status: this.buildStatus()
+          });
+          return;
+        }
+
+        if (settings.data?.safeMode?.enabled && settings.data?.safeMode?.fallbackToMock) {
+          const fallbackPayload = applyOverlaySettings(createMockMatchups({
+            week: settings.league.week === 'current' ? 1 : Number(settings.league.week || 1),
+            pinnedMatchupId: settings.overlay.gameOfWeekMatchupId
+          }), settings);
+          this.currentPayload = fallbackPayload;
+          this.currentHash = payloadHash(fallbackPayload);
+          this.lastSuccessAt = fallbackPayload.updatedAt || new Date().toISOString();
+          this.logger.warn('Safe mode fallback engaged: using mock payload after Yahoo failure');
+          this.sseHub.broadcast('update', {
+            payload: this.currentPayload,
+            scoreChanges: [],
+            playerScoreChanges: [],
+            tdEvents: [],
+            leadChanges: [],
+            upsetEvents: [],
+            finalEvents: [],
+            status: this.buildStatus()
+          });
         }
       }
     }
@@ -1011,7 +1241,9 @@ class DataService {
         return;
       }
 
-      const tdEvents = await this.detectTouchdownEvents(this.currentPayload, settings);
+      const tdResult = await this.detectTouchdownEvents(this.currentPayload, settings);
+      const tdEvents = tdResult.tdEvents || [];
+      const playerScoreChanges = tdResult.playerScoreChanges || [];
       this.tdFailureCount = 0;
       this.lastTdScanAt = new Date().toISOString();
 
@@ -1026,6 +1258,7 @@ class DataService {
 
       await this.triggerScoreHook([], tdEvents, settings.overlay.soundHookUrl);
       this.pushRecent('recentTdEvents', tdEvents, 80);
+      this.pushRecent('recentPlayerScoreChanges', playerScoreChanges, 120);
 
       this.queueAutomationEvents({
         scoreChanges: [],
@@ -1039,6 +1272,7 @@ class DataService {
       this.sseHub.broadcast('update', {
         payload: this.currentPayload,
         scoreChanges: [],
+        playerScoreChanges,
         tdEvents,
         leadChanges: [],
         upsetEvents: [],
@@ -1169,11 +1403,13 @@ module.exports = {
   __testables: {
     isTouchdownLabel,
     computeTdEventsFromStates,
+    computePlayerScoreChangesFromStates,
     deserializeTdState,
     serializeTdState,
     detectScoreChanges,
     detectLeadChanges,
     detectUpsetStarts,
-    detectFinalized
+    detectFinalized,
+    computeScheduleWindowState
   }
 };

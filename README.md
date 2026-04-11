@@ -5,6 +5,7 @@ A local Node.js + Express app that builds a real-time Yahoo Fantasy Football ove
 It supports:
 - live matchup scoreboard polling
 - touchdown player scan + alerts
+- player-level scoring deltas for richer TD context
 - rotating matchup carousel/ticker layouts
 - no-refresh overlay updates via SSE
 - admin/config UI with profile switching
@@ -197,6 +198,8 @@ Reliability controls:
 - circuit breaker with cooldown
 - cached payload fallback
 - preserved overlay rendering in degraded mode
+- schedule-aware overnight throttling (NFL window aware)
+- safe-mode startup fallback to cached/mock payload when Yahoo is unavailable
 
 ## Overlay Features
 
@@ -206,6 +209,8 @@ Reliability controls:
 - smooth transitions for matchup rotation
 - score delta indicators on changed scores
 - closest matchup and upset highlight
+- auto-redzone focus lock on close/upset/active swings
+- matchup story cards between rotations (top score, closest game, momentum/player surge)
 - final-score styling
 - optional pinned Game of the Week
 - dev-only updated indicator
@@ -217,7 +222,9 @@ From `/admin` you can:
 - manage Yahoo credentials + OAuth
 - configure league id/game key/season/week
 - set scoreboard and TD polling intervals
+- configure schedule-aware polling window and off-hours poll rates
 - tune adaptive polling + circuit breaker
+- enable safe mode fallback behavior
 - enable/disable projections/records/logos/ticker
 - set theme colors/font scale/layout mode
 - switch theme packs with one click
@@ -225,6 +232,7 @@ From `/admin` you can:
 - force refresh and force next matchup
 - export/import config JSON
 - view diagnostics/events history
+- export matchup timeline as JSON or CSV from history store
 - configure audio hook and OBS scene automation
 
 ## Scene Presets + Query Params
@@ -239,6 +247,13 @@ Useful params:
 - `mode=ticker`
 - `twoUp=1`
 - `scale=0.90`
+
+Direct scene routes (OBS-friendly):
+- `/overlay/centered-card`
+- `/overlay/lower-third`
+- `/overlay/sidebar-widget`
+- `/overlay/bottom-ticker`
+- `/overlay/ticker`
 
 Example:
 - `http://localhost:3030/overlay?preset=lower-third&scale=0.95`
@@ -259,6 +274,11 @@ Public:
 - `GET /events`
 - `GET /api/public-config`
 - `GET /overlay`
+- `GET /overlay/centered-card`
+- `GET /overlay/lower-third`
+- `GET /overlay/sidebar-widget`
+- `GET /overlay/bottom-ticker`
+- `GET /overlay/ticker`
 - `GET /admin`
 
 Admin-protected (when `ADMIN_API_KEY` configured):
@@ -269,6 +289,7 @@ Admin-protected (when `ADMIN_API_KEY` configured):
 - `GET /api/status`
 - `GET /api/diagnostics`
 - `GET /api/history`
+- `GET /api/history/export?format=json|csv&hours=168`
 - `GET /api/data`
 - `POST /api/refresh`
 - `POST /api/test-connection`

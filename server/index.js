@@ -27,6 +27,7 @@ const rootDir = process.cwd();
 const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
 const sseHub = new SseHub(logger);
 const metrics = new Metrics();
+metrics.set('sse_clients_connected', 0);
 const historyStore = new HistoryStore({ logger });
 
 const getSettings = async () => loadSettings();
@@ -67,7 +68,9 @@ function buildPublicRuntimeSettings(settings) {
       tdScanIntervalMs: settings.data.tdScanIntervalMs,
       retryJitterPct: settings.data.retryJitterPct,
       mockMode: settings.data.mockMode,
+      safeMode: settings.data.safeMode,
       adaptivePolling: settings.data.adaptivePolling,
+      scheduleAware: settings.data.scheduleAware,
       circuitBreaker: {
         enabled: settings.data.circuitBreaker?.enabled,
         failureThreshold: settings.data.circuitBreaker?.failureThreshold,
@@ -144,6 +147,26 @@ app.get('/overlay', (_req, res) => {
   res.sendFile(path.resolve(rootDir, 'client', 'overlay.html'));
 });
 
+app.get('/overlay/centered-card', (_req, res) => {
+  res.redirect('/overlay?preset=centered-card');
+});
+
+app.get('/overlay/lower-third', (_req, res) => {
+  res.redirect('/overlay?preset=lower-third');
+});
+
+app.get('/overlay/sidebar-widget', (_req, res) => {
+  res.redirect('/overlay?preset=sidebar-widget');
+});
+
+app.get('/overlay/bottom-ticker', (_req, res) => {
+  res.redirect('/overlay?preset=bottom-ticker');
+});
+
+app.get('/overlay/ticker', (_req, res) => {
+  res.redirect('/overlay?mode=ticker&preset=bottom-ticker');
+});
+
 app.get('/events', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -153,6 +176,7 @@ app.get('/events', async (req, res) => {
   res.flushHeaders();
   sseHub.register(res);
   metrics.inc('sse_clients_connected_total');
+  metrics.set('sse_clients_connected', sseHub.getClientCount());
 
   const settings = await getSettings();
   const authStatus = await authService.getAuthStatus();
@@ -169,6 +193,8 @@ app.get('/events', async (req, res) => {
 
   req.on('close', () => {
     sseHub.unregister(res);
+    metrics.inc('sse_clients_disconnected_total');
+    metrics.set('sse_clients_connected', sseHub.getClientCount());
   });
 });
 
@@ -257,6 +283,49 @@ app.get('/api/history', requireAdmin, async (req, res) => {
     ok: true,
     history: diagnostics.history
   });
+});
+
+app.get('/api/history/export', requireAdmin, async (req, res) => {
+  const hours = Number(req.query.hours || 168);
+  const format = String(req.query.format || 'json').toLowerCase();
+  const diagnostics = dataService.getDiagnostics({ hours });
+  const scoreEvents = diagnostics.history?.scoreEvents || [];
+  const snapshots = diagnostics.history?.snapshots || [];
+
+  if (format === 'csv') {
+    const header = ['id', 'ts', 'matchupId', 'teamKey', 'from', 'to', 'delta', 'reason'];
+    const escapeCell = (value) => {
+      const raw = value === null || value === undefined ? '' : String(value);
+      return /[",\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+    };
+
+    const rows = scoreEvents.map((event) => ([
+      event.id,
+      event.ts,
+      event.matchupId,
+      event.teamKey,
+      event.from,
+      event.to,
+      event.delta,
+      event.reason
+    ].map(escapeCell).join(',')));
+
+    const csv = `${header.join(',')}\n${rows.join('\n')}\n`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="matchup-timeline.csv"');
+    res.send(csv);
+    return;
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="matchup-timeline.json"');
+  res.send(JSON.stringify({
+    ok: true,
+    exportedAt: new Date().toISOString(),
+    hours,
+    snapshots,
+    scoreEvents
+  }, null, 2));
 });
 
 app.get('/api/data', requireAdmin, (_req, res) => {

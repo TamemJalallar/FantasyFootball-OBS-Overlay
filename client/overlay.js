@@ -10,7 +10,12 @@ const state = {
   eventSource: null,
   changedTeamKeys: new Set(),
   scoreDeltaByTeamKey: new Map(),
-  tdAlertTimers: []
+  tdAlertTimers: [],
+  redzoneFocusIds: new Set(),
+  redzoneLockUntil: 0,
+  recentLeadChanges: [],
+  recentUpsetEvents: [],
+  recentPlayerScoreChanges: []
 };
 
 function escapeHtml(value) {
@@ -141,6 +146,88 @@ function setDegradedIndicator(status) {
   node.classList.remove('hidden');
 }
 
+function getAutoRedzoneConfig() {
+  return state.settings?.overlay?.autoRedzone || { enabled: false, lockMs: 25000 };
+}
+
+function getStoryCardConfig() {
+  return state.settings?.overlay?.storyCards || { enabled: false, interval: 2 };
+}
+
+function isRedzoneLockActive() {
+  const config = getAutoRedzoneConfig();
+  if (!config.enabled) {
+    return false;
+  }
+  if (!state.redzoneFocusIds.size) {
+    return false;
+  }
+  return Date.now() < state.redzoneLockUntil;
+}
+
+function getRotatingMatchups() {
+  const all = state.payload?.matchups || [];
+  if (!all.length) {
+    return [];
+  }
+
+  if (!isRedzoneLockActive()) {
+    return all;
+  }
+
+  const focused = all.filter((matchup) => (
+    state.redzoneFocusIds.has(matchup.id)
+    && (matchup.isLive || matchup.isClosest || matchup.isUpset)
+  ));
+
+  return focused.length ? focused : all;
+}
+
+function primeRedzoneFocus({ payload, scoreChanges = [], tdEvents = [], leadChanges = [], upsetEvents = [] }) {
+  const config = getAutoRedzoneConfig();
+  if (!config.enabled) {
+    state.redzoneFocusIds.clear();
+    state.redzoneLockUntil = 0;
+    return;
+  }
+
+  const focusIds = new Set();
+
+  for (const change of scoreChanges) {
+    if (change?.matchupId) {
+      focusIds.add(change.matchupId);
+    }
+  }
+  for (const lead of leadChanges) {
+    if (lead?.matchupId) {
+      focusIds.add(lead.matchupId);
+    }
+  }
+  for (const upset of upsetEvents) {
+    if (upset?.matchupId) {
+      focusIds.add(upset.matchupId);
+    }
+  }
+  for (const td of tdEvents) {
+    if (td?.matchupId) {
+      focusIds.add(td.matchupId);
+    }
+  }
+
+  for (const matchup of payload?.matchups || []) {
+    if (matchup.isLive && (matchup.isClosest || matchup.isUpset)) {
+      focusIds.add(matchup.id);
+    }
+  }
+
+  if (!focusIds.size) {
+    return;
+  }
+
+  state.redzoneFocusIds = focusIds;
+  state.redzoneLockUntil = Date.now() + Number(config.lockMs || 25000);
+}
+
 function clearTdAlerts() {
   for (const timer of state.tdAlertTimers) {
     clearTimeout(timer);
@@ -180,6 +267,9 @@ function renderTdEvents(tdEvents = []) {
     const details = [
       event.fantasyTeamName || '',
       event.manager || '',
+      Number.isFinite(Number(event.playerPointDelta))
+        ? `${event.playerPointDelta >= 0 ? '+' : ''}${Number(event.playerPointDelta).toFixed(2)} pts`
+        : '',
       Array.isArray(event.tdTypes) && event.tdTypes.length ? event.tdTypes.join(', ') : ''
     ].filter(Boolean).join(' • ');
     subtitle.textContent = details || 'Touchdown scored';
@@ -270,6 +360,10 @@ function createBadgeList(matchup) {
     badges.push('<span class="badge">Upset Alert</span>');
   }
 
+  if (isRedzoneLockActive() && state.redzoneFocusIds.has(matchup.id)) {
+    badges.push('<span class="badge">Redzone Focus</span>');
+  }
+
   return badges.join('');
 }
 
@@ -302,15 +396,130 @@ function createMatchupCard(matchup) {
   `;
 }
 
+function createStoryCard(story) {
+  return `
+    <section class="matchup-card story-card">
+      <header class="matchup-head">
+        <div class="badges">
+          <span class="badge">Story</span>
+          ${story.badge ? `<span class="badge">${escapeHtml(story.badge)}</span>` : ''}
+        </div>
+        <span class="week-label">Weekly Pulse</span>
+      </header>
+      <article class="story-content">
+        <p class="story-title">${escapeHtml(story.title || 'Matchup Story')}</p>
+        <p class="story-body">${escapeHtml(story.body || '')}</p>
+      </article>
+    </section>
+  `;
+}
+
+function buildStoryCards(matchups) {
+  const stories = [];
+  if (!matchups.length) {
+    return stories;
+  }
+
+  const highest = matchups.flatMap((matchup) => ([
+    { matchup, team: matchup.teamA },
+    { matchup, team: matchup.teamB }
+  ])).sort((a, b) => Number(b.team?.points || 0) - Number(a.team?.points || 0))[0];
+
+  if (highest?.team) {
+    stories.push({
+      id: 'story-highest',
+      badge: 'Top Score',
+      title: `${highest.team.name} is pacing the slate`,
+      body: `${formatScore(highest.team.points)} fantasy points with ${highest.team.manager || 'manager'} driving the surge.`
+    });
+  }
+
+  const closest = [...matchups]
+    .filter((matchup) => matchup.status !== 'final')
+    .sort((a, b) => Number(a.scoreDiff || 9999) - Number(b.scoreDiff || 9999))[0];
+  if (closest) {
+    stories.push({
+      id: 'story-closest',
+      badge: 'Closest',
+      title: `${closest.teamA.name} vs ${closest.teamB.name} is razor thin`,
+      body: `Only ${formatScore(closest.scoreDiff)} points apart right now.`
+    });
+  }
+
+  const leadSwing = state.recentLeadChanges[0];
+  if (leadSwing) {
+    const matchup = matchups.find((item) => item.id === leadSwing.matchupId);
+    if (matchup) {
+      const team = matchup.teamA.key === leadSwing.newLeaderKey ? matchup.teamA : matchup.teamB;
+      stories.push({
+        id: `story-swing-${leadSwing.matchupId}`,
+        badge: 'Momentum',
+        title: `${team.name} just flipped the lead`,
+        body: `${team.manager || 'Manager'} has the matchup edge in the latest swing.`
+      });
+    }
+  }
+
+  const playerSurge = state.recentPlayerScoreChanges.find((row) => Number(row.delta) > 0);
+  if (playerSurge) {
+    stories.push({
+      id: `story-player-${playerSurge.playerKey}`,
+      badge: 'Player Surge',
+      title: `${playerSurge.playerName} is climbing fast`,
+      body: `${playerSurge.fantasyTeamName} gained +${Number(playerSurge.delta).toFixed(2)} from this player on the last scan.`
+    });
+  }
+
+  return stories.slice(0, 3);
+}
+
+function getRotationItems() {
+  const matchups = getRotatingMatchups();
+  const base = matchups.map((matchup) => ({ kind: 'matchup', id: matchup.id, matchup }));
+  if (!base.length) {
+    return base;
+  }
+
+  const twoUp = Boolean(state.settings?.overlay?.twoMatchupLayout);
+  const storyConfig = getStoryCardConfig();
+  if (twoUp || !storyConfig.enabled) {
+    return base;
+  }
+
+  const stories = buildStoryCards(matchups);
+  if (!stories.length) {
+    return base;
+  }
+
+  const interval = Math.max(1, Number(storyConfig.interval || 2));
+  const merged = [];
+  let storyIndex = 0;
+
+  for (let i = 0; i < base.length; i += 1) {
+    merged.push(base[i]);
+    if ((i + 1) % interval === 0 && storyIndex < stories.length) {
+      merged.push({ kind: 'story', id: stories[storyIndex].id, story: stories[storyIndex] });
+      storyIndex += 1;
+    }
+  }
+
+  if (!merged.some((item) => item.kind === 'story')) {
+    merged.push({ kind: 'story', id: stories[0].id, story: stories[0] });
+  }
+
+  return merged;
+}
+
 function renderCarousel() {
   const stage = $('carouselStage');
   const tickerStage = $('tickerStage');
   tickerStage.classList.add('hidden');
   stage.classList.remove('hidden');
 
-  const matchups = state.payload?.matchups || [];
+  const items = getRotationItems();
+  const matchups = getRotatingMatchups();
 
-  if (!matchups.length) {
+  if (!items.length) {
     stage.innerHTML = '<div class="matchup-wrap"><section class="matchup-card"><p>No matchup data available.</p></section></div>';
     return;
   }
@@ -328,10 +537,12 @@ function renderCarousel() {
       </div>
     `;
   } else {
-    const current = matchups[state.activeIndex % matchups.length];
+    const currentItem = items[state.activeIndex % items.length];
     stage.innerHTML = `
       <div class="matchup-wrap">
-        ${createMatchupCard(current)}
+        ${currentItem.kind === 'story'
+    ? createStoryCard(currentItem.story)
+    : createMatchupCard(currentItem.matchup)}
       </div>
     `;
   }
@@ -413,7 +624,7 @@ function stopRotation() {
 }
 
 function nextMatchup() {
-  const length = state.payload?.matchups?.length || 0;
+  const length = getRotationItems().length;
   if (!length) {
     return;
   }
@@ -432,7 +643,7 @@ function startRotation() {
     return;
   }
 
-  const length = state.payload?.matchups?.length || 0;
+  const length = getRotationItems().length;
   if (length <= 1) {
     return;
   }
@@ -441,7 +652,7 @@ function startRotation() {
   state.rotationTimer = setInterval(nextMatchup, ms);
 }
 
-function onPayloadUpdate(payload, scoreChanges = [], tdEvents = []) {
+function onPayloadUpdate(payload, scoreChanges = [], tdEvents = [], leadChanges = [], upsetEvents = [], playerScoreChanges = []) {
   const previousRenderKey = state.payloadRenderKey;
   const nextRenderKey = computePayloadRenderKey(payload);
   const shouldRender = !state.payload || previousRenderKey !== nextRenderKey || scoreChanges.length > 0;
@@ -449,7 +660,7 @@ function onPayloadUpdate(payload, scoreChanges = [], tdEvents = []) {
   state.payload = payload;
   state.payloadRenderKey = nextRenderKey;
 
-  const length = state.payload?.matchups?.length || 0;
+  const length = getRotationItems().length;
   if (state.activeIndex >= length) {
     state.activeIndex = 0;
   }
@@ -465,6 +676,24 @@ function onPayloadUpdate(payload, scoreChanges = [], tdEvents = []) {
       state.changedTeamKeys.add(change.teamB.key);
       state.scoreDeltaByTeamKey.set(change.teamB.key, Number(change.teamB.to || 0) - Number(change.teamB.from || 0));
     }
+  }
+
+  primeRedzoneFocus({
+    payload: state.payload,
+    scoreChanges,
+    tdEvents,
+    leadChanges,
+    upsetEvents
+  });
+
+  if (leadChanges.length) {
+    state.recentLeadChanges = [...leadChanges, ...state.recentLeadChanges].slice(0, 20);
+  }
+  if (upsetEvents.length) {
+    state.recentUpsetEvents = [...upsetEvents, ...state.recentUpsetEvents].slice(0, 20);
+  }
+  if (playerScoreChanges.length) {
+    state.recentPlayerScoreChanges = [...playerScoreChanges, ...state.recentPlayerScoreChanges].slice(0, 40);
   }
 
   if (shouldRender) {
@@ -483,13 +712,20 @@ function connectSse() {
     const data = JSON.parse(event.data || '{}');
     state.settings = parseQueryOverrides(data.settings);
     state.status = data.status;
-    onPayloadUpdate(data.payload || { matchups: [] }, [], []);
+    onPayloadUpdate(data.payload || { matchups: [] }, [], [], [], [], []);
   });
 
   es.addEventListener('update', (event) => {
     const data = JSON.parse(event.data || '{}');
     state.status = data.status || state.status;
-    onPayloadUpdate(data.payload || state.payload, data.scoreChanges || [], data.tdEvents || []);
+    onPayloadUpdate(
+      data.payload || state.payload,
+      data.scoreChanges || [],
+      data.tdEvents || [],
+      data.leadChanges || [],
+      data.upsetEvents || [],
+      data.playerScoreChanges || []
+    );
   });
 
   es.addEventListener('status', (event) => {
@@ -503,6 +739,10 @@ function connectSse() {
     const data = JSON.parse(event.data || '{}');
     if (data.settings) {
       state.settings = parseQueryOverrides(data.settings);
+      if (!state.settings?.overlay?.autoRedzone?.enabled) {
+        state.redzoneFocusIds.clear();
+        state.redzoneLockUntil = 0;
+      }
       render();
       renderTdEvents([]);
       startRotation();

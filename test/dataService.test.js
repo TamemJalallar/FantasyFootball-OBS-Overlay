@@ -6,12 +6,14 @@ const { __testables } = require('../server/dataService');
 const {
   isTouchdownLabel,
   computeTdEventsFromStates,
+  computePlayerScoreChangesFromStates,
   serializeTdState,
   deserializeTdState,
   detectScoreChanges,
   detectLeadChanges,
   detectUpsetStarts,
-  detectFinalized
+  detectFinalized,
+  computeScheduleWindowState
 } = __testables;
 
 test('isTouchdownLabel recognizes touchdown labels', () => {
@@ -81,8 +83,55 @@ test('computeTdEventsFromStates emits touchdown deltas', () => {
 
   assert.equal(events.length, 1);
   assert.equal(events[0].touchdownDelta, 1);
+  assert.equal(events[0].playerPointDelta, 6);
   assert.equal(events[0].fantasyTeamName, 'Sunday Surge');
   assert.deepEqual(events[0].tdTypes, ['Receiving TD']);
+});
+
+test('computePlayerScoreChangesFromStates emits per-player scoring deltas', () => {
+  const previousState = new Map([
+    ['team1|player1', {
+      playerKey: 'player1',
+      playerName: 'Player One',
+      teamKey: 'team1',
+      points: 8
+    }],
+    ['team1|player2', {
+      playerKey: 'player2',
+      playerName: 'Player Two',
+      teamKey: 'team1',
+      points: 4
+    }]
+  ]);
+
+  const currentState = new Map([
+    ['team1|player1', {
+      playerKey: 'player1',
+      playerName: 'Player One',
+      teamKey: 'team1',
+      points: 14
+    }],
+    ['team1|player2', {
+      playerKey: 'player2',
+      playerName: 'Player Two',
+      teamKey: 'team1',
+      points: 4
+    }]
+  ]);
+
+  const rows = computePlayerScoreChangesFromStates({
+    previousState,
+    currentState,
+    teamMeta: {
+      team1: { matchupId: 'm1', teamName: 'Alpha' }
+    },
+    now: new Date('2026-04-11T12:00:00.000Z')
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].playerName, 'Player One');
+  assert.equal(rows[0].delta, 6);
+  assert.equal(rows[0].fantasyTeamName, 'Alpha');
 });
 
 test('detectScoreChanges only returns changed matchups', () => {
@@ -207,4 +256,32 @@ test('detectFinalized emits newly completed matchups', () => {
   assert.equal(finals.length, 1);
   assert.equal(finals[0].matchupId, 'm1');
   assert.equal(finals[0].winnerKey, 'team-a');
+});
+
+test('computeScheduleWindowState is active during configured game window', () => {
+  const state = computeScheduleWindowState({
+    enabled: true,
+    timezone: 'UTC',
+    gameDays: ['sun'],
+    gameWindowStartHour: 9,
+    gameWindowEndHour: 24
+  }, new Date('2026-10-18T15:00:00.000Z'));
+
+  assert.equal(state.enabled, true);
+  assert.equal(state.weekday, 'sun');
+  assert.equal(state.active, true);
+  assert.equal(state.inWindow, true);
+});
+
+test('computeScheduleWindowState is inactive outside game window', () => {
+  const state = computeScheduleWindowState({
+    enabled: true,
+    timezone: 'UTC',
+    gameDays: ['sun'],
+    gameWindowStartHour: 9,
+    gameWindowEndHour: 24
+  }, new Date('2026-10-21T03:00:00.000Z'));
+
+  assert.equal(state.weekday, 'wed');
+  assert.equal(state.active, false);
 });

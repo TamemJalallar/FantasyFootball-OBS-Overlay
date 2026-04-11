@@ -106,6 +106,36 @@ body {
   border-color: rgba(255, 113, 136, 0.68);
 }
 
+.story-card {
+  border-color: rgba(120, 166, 255, 0.62);
+  background:
+    linear-gradient(145deg, rgba(77, 108, 255, 0.16), rgba(19, 241, 183, 0.08)),
+    var(--bg-glass);
+}
+
+.story-content {
+  position: relative;
+  z-index: 2;
+  margin-top: 10px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(7, 12, 22, 0.62);
+  border: 1px solid rgba(118, 141, 191, 0.36);
+}
+
+.story-title {
+  margin: 0;
+  font-family: 'Oxanium', sans-serif;
+  font-size: calc(30px * var(--font-scale));
+  line-height: 1.05;
+}
+
+.story-body {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: calc(15px * var(--font-scale));
+}
+
 .matchup-head {
   display: flex;
   justify-content: space-between;

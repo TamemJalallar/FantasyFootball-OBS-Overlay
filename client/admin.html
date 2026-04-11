@@ -169,6 +169,30 @@
           </div>
 
           <div class="row split">
+            <label class="checkbox">Schedule-Aware Polling
+              <input id="scheduleAwareEnabled" type="checkbox" />
+            </label>
+            <label>Timezone
+              <input id="scheduleTimezone" type="text" placeholder="America/New_York" />
+            </label>
+            <label>Game Window Start Hour
+              <input id="scheduleStartHour" type="number" min="0" max="23" step="1" />
+            </label>
+            <label>Game Window End Hour
+              <input id="scheduleEndHour" type="number" min="1" max="24" step="1" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label>Off-hours Scoreboard Poll (ms)
+              <input id="scheduleOffHoursScoreboardMs" type="number" min="15000" step="1000" />
+            </label>
+            <label>Off-hours TD Poll (ms)
+              <input id="scheduleOffHoursTdMs" type="number" min="15000" step="1000" />
+            </label>
+          </div>
+
+          <div class="row split">
             <label class="checkbox">Circuit Breaker
               <input id="circuitEnabled" type="checkbox" />
             </label>
@@ -192,6 +216,12 @@
             </label>
             <label class="checkbox">Mock Mode
               <input id="mockMode" type="checkbox" />
+            </label>
+            <label class="checkbox">Safe Mode Fallback
+              <input id="safeModeEnabled" type="checkbox" />
+            </label>
+            <label class="checkbox">Safe Mode -> Mock
+              <input id="safeModeFallbackToMock" type="checkbox" />
             </label>
           </div>
 
@@ -255,7 +285,17 @@
             <label class="checkbox"><input id="showScoreDelta" type="checkbox" /> Show score deltas</label>
             <label class="checkbox"><input id="highlightClosest" type="checkbox" /> Highlight closest matchup</label>
             <label class="checkbox"><input id="highlightUpset" type="checkbox" /> Highlight upset alerts</label>
+            <label class="checkbox"><input id="autoRedzoneEnabled" type="checkbox" /> Auto-redzone focus</label>
+            <label class="checkbox"><input id="storyCardsEnabled" type="checkbox" /> Show story cards</label>
           </div>
+
+          <label>Auto-redzone Lock Duration (ms)
+            <input id="autoRedzoneLockMs" type="number" min="5000" max="120000" step="1000" />
+          </label>
+
+          <label>Story Card Interval (after N matchup cards)
+            <input id="storyCardsInterval" type="number" min="1" max="6" step="1" />
+          </label>
 
           <label>TD Alert Duration (ms)
             <input id="tdAlertDurationMs" type="number" min="3000" max="20000" step="500" />
@@ -374,8 +414,36 @@
         <section class="panel">
           <h2>Diagnostics</h2>
           <p class="subtle">Runtime metrics, polling telemetry, circuit-breaker status, and history snapshots.</p>
+          <div class="health-grid">
+            <article class="health-card">
+              <p class="health-label">Yahoo API Latency</p>
+              <p class="health-value" id="healthApiLatency">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Yahoo Errors</p>
+              <p class="health-value" id="healthYahooErrors">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Circuit Trips</p>
+              <p class="health-value" id="healthCircuitTrips">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">SSE Clients</p>
+              <p class="health-value" id="healthSseClients">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Next Score Poll</p>
+              <p class="health-value" id="healthNextScorePoll">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Next TD Scan</p>
+              <p class="health-value" id="healthNextTdPoll">--</p>
+            </article>
+          </div>
           <div class="row">
             <button id="refreshDiagnosticsBtn" class="btn ghost">Refresh Diagnostics</button>
+            <button id="exportHistoryJsonBtn" class="btn ghost">Export Timeline JSON</button>
+            <button id="exportHistoryCsvBtn" class="btn ghost">Export Timeline CSV</button>
           </div>
           <pre id="diagnosticsOutput" class="diagnostics-output">Loading diagnostics...</pre>
         </section>

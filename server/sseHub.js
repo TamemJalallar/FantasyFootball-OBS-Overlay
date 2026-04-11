@@ -21,6 +21,10 @@ class SseHub {
     }
   }
 
+  getClientCount() {
+    return this.clients.size;
+  }
+
   broadcast(event, data) {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
