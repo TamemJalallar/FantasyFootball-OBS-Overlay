@@ -82,6 +82,13 @@ FantasyFootball-Yahoo/
 │  └─ settings.example.json
 ├─ cache/
 │  └─ .gitkeep
+├─ docs/
+│  └─ screenshots/
+│     ├─ admin-config.png
+│     ├─ overlay-centered-card.png
+│     ├─ overlay-lower-third.png
+│     ├─ overlay-sidebar-two-up.png
+│     └─ overlay-bottom-ticker.png
 ├─ test/
 │  ├─ normalizer.test.js
 │  └─ dataService.test.js
@@ -113,6 +120,28 @@ npm run dev
 4. Open:
 - Admin: [http://localhost:3030/admin](http://localhost:3030/admin)
 - Overlay: [http://localhost:3030/overlay](http://localhost:3030/overlay)
+
+## Screenshots
+
+### Admin / Config
+
+![Admin Config](docs/screenshots/admin-config.png)
+
+### Overlay - Centered Card
+
+![Overlay Centered Card](docs/screenshots/overlay-centered-card.png)
+
+### Overlay - Lower Third
+
+![Overlay Lower Third](docs/screenshots/overlay-lower-third.png)
+
+### Overlay - Sidebar Two-Up
+
+![Overlay Sidebar Two Up](docs/screenshots/overlay-sidebar-two-up.png)
+
+### Overlay - Bottom Ticker
+
+![Overlay Bottom Ticker](docs/screenshots/overlay-bottom-ticker.png)
 
 ## `.env.example`
 
