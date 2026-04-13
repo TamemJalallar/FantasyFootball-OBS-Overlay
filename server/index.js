@@ -3,9 +3,11 @@ require('dotenv').config();
 const path = require('node:path');
 const express = require('express');
 const { createLogger } = require('./logger');
-const { loadSettings, updateSettings, redactSecrets, getAdminApiKey } = require('./configStore');
+const { loadSettings, updateSettings, redactSecrets, getAdminApiKey, getOverlayApiKey } = require('./configStore');
 const { YahooAuthService } = require('./yahooAuth');
 const { YahooApiClient } = require('./yahooApi');
+const { EspnApiClient } = require('./espnApi');
+const { SleeperApiClient } = require('./sleeperApi');
 const { DataService } = require('./dataService');
 const { SseHub } = require('./sseHub');
 const { Metrics } = require('./metrics');
@@ -34,12 +36,16 @@ const getSettings = async () => loadSettings();
 
 const authService = new YahooAuthService({ logger, getSettings });
 const yahooApi = new YahooApiClient({ logger, authService, metrics });
+const espnApi = new EspnApiClient({ logger, metrics });
+const sleeperApi = new SleeperApiClient({ logger, metrics });
 const audioQueue = new AudioQueue({ logger, getSettings, metrics });
 const obsController = new ObsController({ logger, getSettings, metrics });
 const dataService = new DataService({
   logger,
   getSettings,
   yahooApi,
+  espnApi,
+  sleeperApi,
   authService,
   sseHub,
   metrics,
@@ -63,12 +69,15 @@ function buildPublicRuntimeSettings(settings) {
       week: settings.league.week
     },
     data: {
+      provider: settings.data.provider,
       refreshIntervalMs: settings.data.refreshIntervalMs,
       scoreboardPollMs: settings.data.scoreboardPollMs,
       tdScanIntervalMs: settings.data.tdScanIntervalMs,
       retryJitterPct: settings.data.retryJitterPct,
       mockMode: settings.data.mockMode,
+      mockSeedConfigured: Boolean(settings.data.mockSeed),
       safeMode: settings.data.safeMode,
+      rateLimitBudget: settings.data.rateLimitBudget,
       adaptivePolling: settings.data.adaptivePolling,
       scheduleAware: settings.data.scheduleAware,
       circuitBreaker: {
@@ -84,13 +93,24 @@ function buildPublicRuntimeSettings(settings) {
     security: {
       reducedAnimations: settings.security?.reducedAnimations || false,
       useOsKeychain: settings.security?.useOsKeychain || false,
-      adminApiKeyRequired: Boolean(settings.security?.adminApiKey || process.env.ADMIN_API_KEY)
+      adminApiKeyRequired: Boolean(settings.security?.adminApiKey || process.env.ADMIN_API_KEY),
+      overlayApiKeyRequired: Boolean(settings.security?.overlayApiKey)
     },
     audio: {
       enabled: settings.audio?.enabled || false,
       minDispatchIntervalMs: settings.audio?.minDispatchIntervalMs || 1200,
       maxQueueSize: settings.audio?.maxQueueSize || 50,
-      endpointConfigured: Boolean(settings.audio?.endpointUrl)
+      endpointConfigured: Boolean(settings.audio?.endpointUrl),
+      templates: settings.audio?.templates || {}
+    },
+    integrations: {
+      enabled: settings.integrations?.enabled || false,
+      discordConfigured: Boolean(settings.integrations?.discordWebhookUrl),
+      slackConfigured: Boolean(settings.integrations?.slackWebhookUrl),
+      sendTouchdowns: settings.integrations?.sendTouchdowns ?? true,
+      sendLeadChanges: settings.integrations?.sendLeadChanges ?? true,
+      sendUpsets: settings.integrations?.sendUpsets ?? true,
+      sendFinals: settings.integrations?.sendFinals ?? true
     },
     obs: {
       enabled: settings.obs?.enabled || false,
@@ -115,6 +135,23 @@ async function requireAdmin(req, res, next) {
   return res.status(401).json({
     ok: false,
     message: 'Unauthorized. Provide valid x-admin-key.'
+  });
+}
+
+async function requireOverlayRead(req, res, next) {
+  const requiredKey = await getOverlayApiKey();
+  if (!requiredKey) {
+    return next();
+  }
+
+  const providedKey = String(req.header('x-overlay-key') || req.query.overlayKey || '').trim();
+  if (providedKey && providedKey === requiredKey) {
+    return next();
+  }
+
+  return res.status(401).json({
+    ok: false,
+    message: 'Unauthorized. Provide valid overlayKey.'
   });
 }
 
@@ -143,31 +180,36 @@ app.get('/admin', (_req, res) => {
   res.sendFile(path.resolve(rootDir, 'client', 'admin.html'));
 });
 
-app.get('/overlay', (_req, res) => {
+app.get('/overlay', requireOverlayRead, (_req, res) => {
   res.sendFile(path.resolve(rootDir, 'client', 'overlay.html'));
 });
 
-app.get('/overlay/centered-card', (_req, res) => {
-  res.redirect('/overlay?preset=centered-card');
+app.get('/overlay/centered-card', requireOverlayRead, (req, res) => {
+  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
+  res.redirect(`/overlay?preset=centered-card${suffix}`);
 });
 
-app.get('/overlay/lower-third', (_req, res) => {
-  res.redirect('/overlay?preset=lower-third');
+app.get('/overlay/lower-third', requireOverlayRead, (req, res) => {
+  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
+  res.redirect(`/overlay?preset=lower-third${suffix}`);
 });
 
-app.get('/overlay/sidebar-widget', (_req, res) => {
-  res.redirect('/overlay?preset=sidebar-widget');
+app.get('/overlay/sidebar-widget', requireOverlayRead, (req, res) => {
+  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
+  res.redirect(`/overlay?preset=sidebar-widget${suffix}`);
 });
 
-app.get('/overlay/bottom-ticker', (_req, res) => {
-  res.redirect('/overlay?preset=bottom-ticker');
+app.get('/overlay/bottom-ticker', requireOverlayRead, (req, res) => {
+  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
+  res.redirect(`/overlay?preset=bottom-ticker${suffix}`);
 });
 
-app.get('/overlay/ticker', (_req, res) => {
-  res.redirect('/overlay?mode=ticker&preset=bottom-ticker');
+app.get('/overlay/ticker', requireOverlayRead, (req, res) => {
+  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
+  res.redirect(`/overlay?mode=ticker&preset=bottom-ticker${suffix}`);
 });
 
-app.get('/events', async (req, res) => {
+app.get('/events', requireOverlayRead, async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -198,9 +240,17 @@ app.get('/events', async (req, res) => {
   });
 });
 
-app.get('/api/public-config', async (_req, res) => {
+app.get('/api/public-config', requireOverlayRead, async (_req, res) => {
   const settings = await getSettings();
   res.json({ settings: buildPublicRuntimeSettings(settings) });
+});
+
+app.get('/api/public-snapshot', requireOverlayRead, async (_req, res) => {
+  const settings = await getSettings();
+  res.json({
+    ...dataService.getSnapshot(),
+    settings: buildPublicRuntimeSettings(settings)
+  });
 });
 
 app.get('/api/config', requireAdmin, async (_req, res) => {
@@ -234,12 +284,35 @@ app.post('/api/config/import', requireAdmin, async (req, res) => {
     }
   }
 
-  if (incoming.security && incoming.security.adminApiKey === '********') {
-    incoming.security.adminApiKey = current.security.adminApiKey;
+  if (incoming.espn) {
+    if (incoming.espn.swid === '********') {
+      incoming.espn.swid = current.espn.swid;
+    }
+    if (incoming.espn.espnS2 === '********') {
+      incoming.espn.espnS2 = current.espn.espnS2;
+    }
+  }
+
+  if (incoming.security) {
+    if (incoming.security.adminApiKey === '********') {
+      incoming.security.adminApiKey = current.security.adminApiKey;
+    }
+    if (incoming.security.overlayApiKey === '********') {
+      incoming.security.overlayApiKey = current.security.overlayApiKey;
+    }
   }
 
   if (incoming.obs && incoming.obs.password === '********') {
     incoming.obs.password = current.obs.password;
+  }
+
+  if (incoming.integrations) {
+    if (incoming.integrations.discordWebhookUrl === '********') {
+      incoming.integrations.discordWebhookUrl = current.integrations.discordWebhookUrl;
+    }
+    if (incoming.integrations.slackWebhookUrl === '********') {
+      incoming.integrations.slackWebhookUrl = current.integrations.slackWebhookUrl;
+    }
   }
 
   const settings = await updateSettings(incoming);
@@ -259,11 +332,12 @@ app.post('/api/config/import', requireAdmin, async (req, res) => {
 app.get('/api/status', requireAdmin, async (_req, res) => {
   const settings = await getSettings();
   const authStatus = await authService.getAuthStatus();
+  const serviceStatus = dataService.buildStatus();
 
   res.json({
-    status: dataService.buildStatus(),
+    status: serviceStatus,
     auth: authStatus,
-    mode: settings.data.mockMode ? 'mock' : 'yahoo',
+    mode: serviceStatus.mode || settings.data.provider || 'unknown',
     metrics: metrics.snapshot()
   });
 });
@@ -278,19 +352,25 @@ app.get('/api/diagnostics', requireAdmin, async (req, res) => {
 
 app.get('/api/history', requireAdmin, async (req, res) => {
   const hours = Number(req.query.hours || 24);
+  const week = Number(req.query.week || 0) || null;
   const diagnostics = dataService.getDiagnostics({ hours });
+  const snapshots = historyStore.recentSnapshots({ hours, limit: 50, week });
   res.json({
     ok: true,
-    history: diagnostics.history
+    history: {
+      ...diagnostics.history,
+      snapshots
+    }
   });
 });
 
 app.get('/api/history/export', requireAdmin, async (req, res) => {
   const hours = Number(req.query.hours || 168);
+  const week = Number(req.query.week || 0) || null;
   const format = String(req.query.format || 'json').toLowerCase();
   const diagnostics = dataService.getDiagnostics({ hours });
   const scoreEvents = diagnostics.history?.scoreEvents || [];
-  const snapshots = diagnostics.history?.snapshots || [];
+  const snapshots = historyStore.recentSnapshots({ hours, limit: 200, week });
 
   if (format === 'csv') {
     const header = ['id', 'ts', 'matchupId', 'teamKey', 'from', 'to', 'delta', 'reason'];
@@ -323,9 +403,22 @@ app.get('/api/history/export', requireAdmin, async (req, res) => {
     ok: true,
     exportedAt: new Date().toISOString(),
     hours,
+    week,
     snapshots,
     scoreEvents
   }, null, 2));
+});
+
+app.post('/api/history/replay', requireAdmin, async (req, res) => {
+  const snapshotId = Number(req.body?.snapshotId || 0);
+  const snapshot = historyStore.snapshotById(snapshotId);
+  if (!snapshot?.payload) {
+    res.status(404).json({ ok: false, message: 'Snapshot not found.' });
+    return;
+  }
+
+  dataService.replaySnapshot(snapshot.payload);
+  res.json({ ok: true, snapshotId });
 });
 
 app.get('/api/data', requireAdmin, (_req, res) => {
@@ -348,12 +441,35 @@ app.put('/api/config', requireAdmin, async (req, res) => {
     }
   }
 
-  if (incoming.security && incoming.security.adminApiKey === '********') {
-    incoming.security.adminApiKey = current.security.adminApiKey;
+  if (incoming.espn) {
+    if (incoming.espn.swid === '********') {
+      incoming.espn.swid = current.espn.swid;
+    }
+    if (incoming.espn.espnS2 === '********') {
+      incoming.espn.espnS2 = current.espn.espnS2;
+    }
+  }
+
+  if (incoming.security) {
+    if (incoming.security.adminApiKey === '********') {
+      incoming.security.adminApiKey = current.security.adminApiKey;
+    }
+    if (incoming.security.overlayApiKey === '********') {
+      incoming.security.overlayApiKey = current.security.overlayApiKey;
+    }
   }
 
   if (incoming.obs && incoming.obs.password === '********') {
     incoming.obs.password = current.obs.password;
+  }
+
+  if (incoming.integrations) {
+    if (incoming.integrations.discordWebhookUrl === '********') {
+      incoming.integrations.discordWebhookUrl = current.integrations.discordWebhookUrl;
+    }
+    if (incoming.integrations.slackWebhookUrl === '********') {
+      incoming.integrations.slackWebhookUrl = current.integrations.slackWebhookUrl;
+    }
   }
 
   const settings = await updateSettings(incoming);
@@ -389,6 +505,32 @@ app.post('/api/test-connection', requireAdmin, async (_req, res) => {
 
 app.post('/api/control/next', requireAdmin, (_req, res) => {
   dataService.manualNext();
+  res.json({ ok: true });
+});
+
+app.post('/api/control/pause', requireAdmin, (req, res) => {
+  dataService.setRotationPaused(Boolean(req.body?.paused));
+  res.json({ ok: true, paused: Boolean(req.body?.paused) });
+});
+
+app.post('/api/control/resume', requireAdmin, (_req, res) => {
+  dataService.setRotationPaused(false);
+  res.json({ ok: true, paused: false });
+});
+
+app.post('/api/control/pin', requireAdmin, (req, res) => {
+  const matchupId = String(req.body?.matchupId || '').trim();
+  dataService.pinMatchup(matchupId);
+  res.json({ ok: true, matchupId });
+});
+
+app.post('/api/control/unpin', requireAdmin, (_req, res) => {
+  dataService.pinMatchup('');
+  res.json({ ok: true, matchupId: '' });
+});
+
+app.post('/api/control/story', requireAdmin, (_req, res) => {
+  dataService.triggerStoryCard();
   res.json({ ok: true });
 });
 
@@ -441,9 +583,20 @@ app.post('/api/profiles/switch', requireAdmin, async (req, res) => {
       ...profile.settings.yahoo,
       clientSecret: current.yahoo.clientSecret
     },
+    espn: {
+      ...profile.settings.espn,
+      swid: current.espn.swid,
+      espnS2: current.espn.espnS2
+    },
     security: {
       ...profile.settings.security,
-      adminApiKey: current.security.adminApiKey
+      adminApiKey: current.security.adminApiKey,
+      overlayApiKey: current.security.overlayApiKey
+    },
+    integrations: {
+      ...profile.settings.integrations,
+      discordWebhookUrl: current.integrations.discordWebhookUrl,
+      slackWebhookUrl: current.integrations.slackWebhookUrl
     },
     obs: {
       ...profile.settings.obs,

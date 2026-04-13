@@ -1,0 +1,31 @@
+<section class="matchup-card closest">
+<header class="matchup-head">
+<div class="badges"><span class="badge live">live</span><span class="badge">Game of the Week</span><span class="badge">Closest</span><span class="badge">Redzone Focus</span></div>
+<span class="week-label">Week 7</span>
+</header>
+<article class="team-row leading">
+<div class="logo logo-fallback" aria-hidden="true">SS</div>
+<div class="team-meta">
+<p class="team-name">Sunday Surge</p>
+<p class="team-manager">Home: Tamem</p>
+<p class="team-extra">Record 4-2 • Proj 121.40 • Win 62.3%</p>
+</div>
+<div class="team-score score-pop">
+<span>109.20</span>
+<small class="score-delta up">+6.40</small>
+</div>
+</article>
+<article class="team-row ">
+<div class="logo logo-fallback" aria-hidden="true">GR</div>
+<div class="team-meta">
+<p class="team-name">Gridiron Reapers</p>
+<p class="team-manager">Away: Alex</p>
+<p class="team-extra">Record 3-3 • Proj 117.80 • Win 37.7%</p>
+</div>
+<div class="team-score ">
+<span>105.80</span>
+<small class="score-delta down">-1.20</small>
+</div>
+</article>
+<div class="projection"><span>Projected Winner: Sunday Surge</span><span>Diff 3.40</span></div>
+</section>

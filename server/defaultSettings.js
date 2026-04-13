@@ -12,7 +12,20 @@ const DEFAULT_SETTINGS = {
     redirectUri: '',
     scope: 'fspt-r'
   },
+  espn: {
+    leagueId: '',
+    season: new Date().getFullYear(),
+    week: 'current',
+    swid: '',
+    espnS2: ''
+  },
+  sleeper: {
+    leagueId: '',
+    season: new Date().getFullYear(),
+    week: 'current'
+  },
   data: {
+    provider: 'yahoo',
     refreshIntervalMs: 10000,
     scoreboardPollMs: 10000,
     tdScanIntervalMs: 10000,
@@ -36,7 +49,8 @@ const DEFAULT_SETTINGS = {
     },
     safeMode: {
       enabled: true,
-      fallbackToMock: true
+      fallbackToMock: true,
+      startupForceFallbackIfAuthDown: true
     },
     circuitBreaker: {
       enabled: true,
@@ -48,8 +62,14 @@ const DEFAULT_SETTINGS = {
       enabled: true,
       retentionDays: 14
     },
+    rateLimitBudget: {
+      enabled: true,
+      perHour: 1800,
+      warnThresholdPct: 0.8
+    },
     useCacheOnFailure: true,
-    mockMode: true
+    mockMode: true,
+    mockSeed: ''
   },
   overlay: {
     mode: 'carousel',
@@ -68,11 +88,22 @@ const DEFAULT_SETTINGS = {
     highlightUpset: true,
     autoRedzone: {
       enabled: true,
-      lockMs: 25000
+      lockMs: 25000,
+      focusLimit: 3,
+      maxScoreDiff: 12
     },
     storyCards: {
       enabled: true,
       interval: 2
+    },
+    branding: {
+      enabled: true,
+      leagueTitle: 'Fantasy Football Live',
+      watermarkEnabled: true,
+      watermarkText: 'Yahoo Fantasy Overlay',
+      watermarkLogoUrl: '',
+      fontDisplay: 'Rajdhani',
+      fontBody: 'Rajdhani'
     },
     gameOfWeekMatchupId: '',
     soundHookUrl: '',
@@ -94,6 +125,7 @@ const DEFAULT_SETTINGS = {
   },
   security: {
     adminApiKey: '',
+    overlayApiKey: '',
     reducedAnimations: false,
     useOsKeychain: false
   },
@@ -101,7 +133,22 @@ const DEFAULT_SETTINGS = {
     enabled: false,
     endpointUrl: '',
     minDispatchIntervalMs: 1200,
-    maxQueueSize: 50
+    maxQueueSize: 50,
+    templates: {
+      touchdown: 'default-td',
+      lead_change: 'default-lead',
+      upset: 'default-upset',
+      final: 'default-final'
+    }
+  },
+  integrations: {
+    enabled: false,
+    discordWebhookUrl: '',
+    slackWebhookUrl: '',
+    sendTouchdowns: true,
+    sendLeadChanges: true,
+    sendUpsets: true,
+    sendFinals: true
   },
   obs: {
     enabled: false,

@@ -80,6 +80,24 @@ function withAdminHeaders(headers = {}) {
   };
 }
 
+function getOverlayReadKey() {
+  const raw = ($('overlayApiKeyInput')?.value || '').trim();
+  if (raw === '********') {
+    return '';
+  }
+  return raw;
+}
+
+function appendOverlayKey(url) {
+  const key = getOverlayReadKey();
+  if (!key) {
+    return url;
+  }
+
+  const hasQuery = url.includes('?');
+  return `${url}${hasQuery ? '&' : '?'}overlayKey=${encodeURIComponent(key)}`;
+}
+
 function setPill(id, label, ok) {
   const node = $(id);
   node.textContent = label;
@@ -130,12 +148,22 @@ function applyThemePreview() {
   preview.style.setProperty('--accent-2', $('secondaryColor').value);
 }
 
-function setWeekMode(mode, weekNumber) {
-  $('weekMode').value = mode;
-  $('weekNumber').disabled = mode === 'current';
-  if (mode === 'current') {
-    $('weekNumber').value = Number.isFinite(weekNumber) ? String(weekNumber) : '1';
+function setScopedWeekMode(modeInputId, weekInputId, mode, weekNumber, fallbackWeek = 1) {
+  const modeNode = $(modeInputId);
+  const weekNode = $(weekInputId);
+  if (!modeNode || !weekNode) {
+    return;
   }
+
+  modeNode.value = mode;
+  weekNode.disabled = mode === 'current';
+  if (mode === 'current') {
+    weekNode.value = Number.isFinite(weekNumber) ? String(weekNumber) : String(fallbackWeek);
+  }
+}
+
+function setWeekMode(mode, weekNumber) {
+  setScopedWeekMode('weekMode', 'weekNumber', mode, weekNumber, 1);
 }
 
 function renderProfiles() {
@@ -167,8 +195,29 @@ function fillForm(settings) {
   $('yahooScope').value = settings.yahoo.scope || 'fspt-r';
 
   $('leagueId').value = settings.league.leagueId || '';
+  $('providerSelect').value = settings.data.provider || 'yahoo';
   $('gameKey').value = settings.league.gameKey || '';
   $('season').value = settings.league.season || '';
+
+  $('espnLeagueId').value = settings.espn?.leagueId || '';
+  $('espnSeason').value = settings.espn?.season || settings.league.season || '';
+  if (settings.espn?.week === 'current' || settings.espn?.week === undefined || settings.espn?.week === null) {
+    setScopedWeekMode('espnWeekMode', 'espnWeekNumber', 'current', 1, 1);
+  } else {
+    setScopedWeekMode('espnWeekMode', 'espnWeekNumber', 'custom', Number(settings.espn.week || 1), 1);
+    $('espnWeekNumber').value = settings.espn.week;
+  }
+  $('espnSwid').value = settings.espn?.swid || '';
+  $('espnS2').value = settings.espn?.espnS2 || '';
+
+  $('sleeperLeagueId').value = settings.sleeper?.leagueId || '';
+  $('sleeperSeason').value = settings.sleeper?.season || settings.league.season || '';
+  if (settings.sleeper?.week === 'current' || settings.sleeper?.week === undefined || settings.sleeper?.week === null) {
+    setScopedWeekMode('sleeperWeekMode', 'sleeperWeekNumber', 'current', 1, 1);
+  } else {
+    setScopedWeekMode('sleeperWeekMode', 'sleeperWeekNumber', 'custom', Number(settings.sleeper.week || 1), 1);
+    $('sleeperWeekNumber').value = settings.sleeper.week;
+  }
 
   if (settings.league.week === 'current') {
     setWeekMode('current', 1);
@@ -204,8 +253,13 @@ function fillForm(settings) {
   $('historyRetentionDays').value = settings.data.history?.retentionDays ?? 14;
   $('safeModeEnabled').checked = Boolean(settings.data.safeMode?.enabled);
   $('safeModeFallbackToMock').checked = Boolean(settings.data.safeMode?.fallbackToMock);
+  $('safeModeStartupForceFallback').checked = Boolean(settings.data.safeMode?.startupForceFallbackIfAuthDown);
+  $('rateBudgetEnabled').checked = Boolean(settings.data.rateLimitBudget?.enabled);
+  $('rateBudgetPerHour').value = settings.data.rateLimitBudget?.perHour ?? 1800;
+  $('rateBudgetWarnThreshold').value = settings.data.rateLimitBudget?.warnThresholdPct ?? 0.8;
 
   $('mockMode').checked = Boolean(settings.data.mockMode);
+  $('mockSeed').value = settings.data.mockSeed || '';
   $('teamOverrides').value = JSON.stringify(settings.league.teamNameOverrides || {}, null, 2);
 
   $('overlayMode').value = settings.overlay.mode;
@@ -226,14 +280,26 @@ function fillForm(settings) {
   $('showScoreDelta').checked = Boolean(settings.overlay.showScoreDelta);
   $('autoRedzoneEnabled').checked = Boolean(settings.overlay.autoRedzone?.enabled);
   $('autoRedzoneLockMs').value = settings.overlay.autoRedzone?.lockMs ?? 25000;
+  $('autoRedzoneFocusLimit').value = settings.overlay.autoRedzone?.focusLimit ?? 3;
+  $('autoRedzoneMaxScoreDiff').value = settings.overlay.autoRedzone?.maxScoreDiff ?? 12;
   $('storyCardsEnabled').checked = Boolean(settings.overlay.storyCards?.enabled);
   $('storyCardsInterval').value = settings.overlay.storyCards?.interval ?? 2;
   $('tdAlertDurationMs').value = settings.overlay.tdAlertDurationMs || 8000;
   $('highlightClosest').checked = Boolean(settings.overlay.highlightClosest);
   $('highlightUpset').checked = Boolean(settings.overlay.highlightUpset);
+  $('brandingEnabled').checked = Boolean(settings.overlay.branding?.enabled);
+  $('brandingWatermarkEnabled').checked = Boolean(settings.overlay.branding?.watermarkEnabled);
+  $('leagueTitleInput').value = settings.overlay.branding?.leagueTitle || 'Fantasy Football Live';
+  $('watermarkTextInput').value = settings.overlay.branding?.watermarkText || 'Yahoo Fantasy Overlay';
+  $('watermarkLogoUrlInput').value = settings.overlay.branding?.watermarkLogoUrl || '';
+  $('fontDisplaySelect').value = settings.overlay.branding?.fontDisplay || 'Rajdhani';
+  $('fontBodySelect').value = settings.overlay.branding?.fontBody || 'Rajdhani';
 
   if (!$('adminApiKeyInput').value.trim() && settings.security?.adminApiKey) {
     $('adminApiKeyInput').value = settings.security.adminApiKey;
+  }
+  if (!$('overlayApiKeyInput').value.trim() && settings.security?.overlayApiKey) {
+    $('overlayApiKeyInput').value = settings.security.overlayApiKey;
   }
 
   $('gameOfWeekMatchupId').value = settings.overlay.gameOfWeekMatchupId || '';
@@ -252,6 +318,18 @@ function fillForm(settings) {
   $('audioEndpointUrl').value = settings.audio?.endpointUrl || '';
   $('audioMinDispatchIntervalMs').value = settings.audio?.minDispatchIntervalMs ?? 1200;
   $('audioMaxQueueSize').value = settings.audio?.maxQueueSize ?? 50;
+  $('audioTemplateTouchdown').value = settings.audio?.templates?.touchdown || 'default-td';
+  $('audioTemplateLeadChange').value = settings.audio?.templates?.lead_change || 'default-lead';
+  $('audioTemplateUpset').value = settings.audio?.templates?.upset || 'default-upset';
+  $('audioTemplateFinal').value = settings.audio?.templates?.final || 'default-final';
+
+  $('integrationsEnabled').checked = Boolean(settings.integrations?.enabled);
+  $('discordWebhookUrl').value = settings.integrations?.discordWebhookUrl || '';
+  $('slackWebhookUrl').value = settings.integrations?.slackWebhookUrl || '';
+  $('sendTouchdowns').checked = settings.integrations?.sendTouchdowns ?? true;
+  $('sendLeadChanges').checked = settings.integrations?.sendLeadChanges ?? true;
+  $('sendUpsets').checked = settings.integrations?.sendUpsets ?? true;
+  $('sendFinals').checked = settings.integrations?.sendFinals ?? true;
 
   $('obsEnabled').checked = Boolean(settings.obs?.enabled);
   $('obsWsUrl').value = settings.obs?.wsUrl || 'ws://127.0.0.1:4455';
@@ -263,6 +341,11 @@ function fillForm(settings) {
   $('obsSceneDefault').value = settings.obs?.scenes?.default || '';
 
   applyThemePreview();
+
+  const overlayUrl = appendOverlayKey(`${window.location.origin}/overlay`);
+  $('overlayUrl').value = overlayUrl;
+  $('openOverlayPreviewLink').href = overlayUrl;
+  renderPresetLinks(`${window.location.origin}/overlay`);
 }
 
 function collectForm() {
@@ -275,6 +358,10 @@ function collectForm() {
 
   const weekMode = $('weekMode').value;
   const week = weekMode === 'current' ? 'current' : numberValue($('weekNumber'), 1);
+  const espnWeekMode = $('espnWeekMode').value;
+  const espnWeek = espnWeekMode === 'current' ? 'current' : numberValue($('espnWeekNumber'), 1);
+  const sleeperWeekMode = $('sleeperWeekMode').value;
+  const sleeperWeek = sleeperWeekMode === 'current' ? 'current' : numberValue($('sleeperWeekNumber'), 1);
 
   return {
     yahoo: {
@@ -282,6 +369,18 @@ function collectForm() {
       clientSecret: $('yahooClientSecret').value,
       redirectUri: $('yahooRedirectUri').value.trim(),
       scope: $('yahooScope').value.trim() || 'fspt-r'
+    },
+    espn: {
+      leagueId: $('espnLeagueId').value.trim(),
+      season: numberValue($('espnSeason'), numberValue($('season'), new Date().getFullYear())),
+      week: espnWeek,
+      swid: $('espnSwid').value.trim(),
+      espnS2: $('espnS2').value.trim()
+    },
+    sleeper: {
+      leagueId: $('sleeperLeagueId').value.trim(),
+      season: numberValue($('sleeperSeason'), numberValue($('season'), new Date().getFullYear())),
+      week: sleeperWeek
     },
     league: {
       leagueId: $('leagueId').value.trim(),
@@ -291,6 +390,7 @@ function collectForm() {
       teamNameOverrides: overrides
     },
     data: {
+      provider: $('providerSelect').value,
       refreshIntervalMs: numberValue($('refreshIntervalMs'), 10000),
       scoreboardPollMs: numberValue($('scoreboardPollMs'), 10000),
       tdScanIntervalMs: numberValue($('tdScanIntervalMs'), 10000),
@@ -323,9 +423,16 @@ function collectForm() {
       },
       safeMode: {
         enabled: bool($('safeModeEnabled')),
-        fallbackToMock: bool($('safeModeFallbackToMock'))
+        fallbackToMock: bool($('safeModeFallbackToMock')),
+        startupForceFallbackIfAuthDown: bool($('safeModeStartupForceFallback'))
       },
-      mockMode: bool($('mockMode'))
+      rateLimitBudget: {
+        enabled: bool($('rateBudgetEnabled')),
+        perHour: numberValue($('rateBudgetPerHour'), 1800),
+        warnThresholdPct: numberValue($('rateBudgetWarnThreshold'), 0.8)
+      },
+      mockMode: bool($('mockMode')),
+      mockSeed: $('mockSeed').value.trim()
     },
     overlay: {
       mode: $('overlayMode').value,
@@ -341,7 +448,9 @@ function collectForm() {
       showScoreDelta: bool($('showScoreDelta')),
       autoRedzone: {
         enabled: bool($('autoRedzoneEnabled')),
-        lockMs: numberValue($('autoRedzoneLockMs'), 25000)
+        lockMs: numberValue($('autoRedzoneLockMs'), 25000),
+        focusLimit: numberValue($('autoRedzoneFocusLimit'), 3),
+        maxScoreDiff: numberValue($('autoRedzoneMaxScoreDiff'), 12)
       },
       storyCards: {
         enabled: bool($('storyCardsEnabled')),
@@ -350,6 +459,15 @@ function collectForm() {
       tdAlertDurationMs: numberValue($('tdAlertDurationMs'), 8000),
       highlightClosest: bool($('highlightClosest')),
       highlightUpset: bool($('highlightUpset')),
+      branding: {
+        enabled: bool($('brandingEnabled')),
+        leagueTitle: $('leagueTitleInput').value.trim(),
+        watermarkEnabled: bool($('brandingWatermarkEnabled')),
+        watermarkText: $('watermarkTextInput').value.trim(),
+        watermarkLogoUrl: $('watermarkLogoUrlInput').value.trim(),
+        fontDisplay: $('fontDisplaySelect').value,
+        fontBody: $('fontBodySelect').value
+      },
       gameOfWeekMatchupId: $('gameOfWeekMatchupId').value.trim(),
       soundHookUrl: $('soundHookUrl').value.trim(),
       themePack: $('themePack').value
@@ -369,6 +487,7 @@ function collectForm() {
     },
     security: {
       adminApiKey: $('adminApiKeyInput').value.trim(),
+      overlayApiKey: $('overlayApiKeyInput').value.trim(),
       reducedAnimations: $('reducedAnimations').value === 'true',
       useOsKeychain: bool($('useOsKeychain'))
     },
@@ -376,7 +495,22 @@ function collectForm() {
       enabled: bool($('audioEnabled')),
       endpointUrl: $('audioEndpointUrl').value.trim(),
       minDispatchIntervalMs: numberValue($('audioMinDispatchIntervalMs'), 1200),
-      maxQueueSize: numberValue($('audioMaxQueueSize'), 50)
+      maxQueueSize: numberValue($('audioMaxQueueSize'), 50),
+      templates: {
+        touchdown: $('audioTemplateTouchdown').value.trim() || 'default-td',
+        lead_change: $('audioTemplateLeadChange').value.trim() || 'default-lead',
+        upset: $('audioTemplateUpset').value.trim() || 'default-upset',
+        final: $('audioTemplateFinal').value.trim() || 'default-final'
+      }
+    },
+    integrations: {
+      enabled: bool($('integrationsEnabled')),
+      discordWebhookUrl: $('discordWebhookUrl').value.trim(),
+      slackWebhookUrl: $('slackWebhookUrl').value.trim(),
+      sendTouchdowns: bool($('sendTouchdowns')),
+      sendLeadChanges: bool($('sendLeadChanges')),
+      sendUpsets: bool($('sendUpsets')),
+      sendFinals: bool($('sendFinals'))
     },
     obs: {
       enabled: bool($('obsEnabled')),
@@ -440,22 +574,19 @@ async function load() {
 
   await refreshProfiles();
   await refreshDiagnostics();
-
-  const overlayUrl = `${window.location.origin}/overlay`;
-  $('overlayUrl').value = overlayUrl;
-  renderPresetLinks(overlayUrl);
 }
 
 function renderPresetLinks(base) {
   const node = $('presetLinks');
   const origin = window.location.origin;
+  const normalizedBase = base || `${origin}/overlay`;
   const links = [
-    { label: 'Centered Card', url: `${origin}/overlay/centered-card` },
-    { label: 'Lower Third', url: `${origin}/overlay/lower-third` },
-    { label: 'Sidebar Widget', url: `${origin}/overlay/sidebar-widget` },
-    { label: 'Bottom Ticker', url: `${origin}/overlay/bottom-ticker` },
-    { label: 'Ticker Mode', url: `${origin}/overlay/ticker` },
-    { label: 'Two-Up Sidebar', url: `${base}?preset=sidebar-widget&twoUp=1&scale=0.95` }
+    { label: 'Centered Card', url: appendOverlayKey(`${origin}/overlay/centered-card`) },
+    { label: 'Lower Third', url: appendOverlayKey(`${origin}/overlay/lower-third`) },
+    { label: 'Sidebar Widget', url: appendOverlayKey(`${origin}/overlay/sidebar-widget`) },
+    { label: 'Bottom Ticker', url: appendOverlayKey(`${origin}/overlay/bottom-ticker`) },
+    { label: 'Ticker Mode', url: appendOverlayKey(`${origin}/overlay/ticker`) },
+    { label: 'Two-Up Sidebar', url: appendOverlayKey(`${normalizedBase}?preset=sidebar-widget&twoUp=1&scale=0.95`) }
   ];
 
   node.innerHTML = links
@@ -486,6 +617,7 @@ function renderHealthTiles(diagnostics) {
   const counters = diagnostics?.metrics?.counters || {};
   const gauges = diagnostics?.metrics?.gauges || {};
   const status = diagnostics?.status || {};
+  const budget = diagnostics?.yahooBudget || null;
 
   $('healthApiLatency').textContent = formatMsCompact(gauges.yahoo_last_request_duration_ms);
   $('healthYahooErrors').textContent = String(counters.yahoo_requests_failed_total || 0);
@@ -493,6 +625,13 @@ function renderHealthTiles(diagnostics) {
   $('healthSseClients').textContent = String(gauges.sse_clients_connected || 0);
   $('healthNextScorePoll').textContent = formatMsCompact(status.nextScoreboardDelayMs);
   $('healthNextTdPoll').textContent = formatMsCompact(status.nextTdDelayMs);
+  $('healthProvider').textContent = String(status.provider || status.mode || '--');
+  $('healthRateBudget').textContent = budget
+    ? `${Math.round(Number(budget.usagePct || 0) * 100)}%`
+    : '--';
+  $('healthCircuitState').textContent = status.circuitOpenUntil
+    ? `OPEN (${status.circuitReason || 'unknown'})`
+    : 'Closed';
 }
 
 function refreshAuthPills() {
@@ -533,6 +672,9 @@ async function refreshStatus() {
   const statusPayload = await fetchJson('/api/status');
   state.status = statusPayload.status;
   state.auth = statusPayload.auth;
+  if (typeof state.status?.controlState?.pinnedMatchupId === 'string') {
+    $('pinnedMatchupId').value = state.status.controlState.pinnedMatchupId;
+  }
   refreshAuthPills();
   updateStatusLine();
 }
@@ -544,11 +686,14 @@ async function refreshDiagnostics() {
 
   const output = {
     status: payload.diagnostics.status,
+    yahooBudget: payload.diagnostics.yahooBudget,
     metrics: payload.diagnostics.metrics,
     recentPolls: (payload.diagnostics.pollRecords || []).slice(0, 12),
     recentLeadChanges: (payload.diagnostics.recentLeadChanges || []).slice(0, 8),
     recentUpsetEvents: (payload.diagnostics.recentUpsetEvents || []).slice(0, 8),
-    recentTdEvents: (payload.diagnostics.recentTdEvents || []).slice(0, 8)
+    recentFinalEvents: (payload.diagnostics.recentFinalEvents || []).slice(0, 8),
+    recentTdEvents: (payload.diagnostics.recentTdEvents || []).slice(0, 8),
+    recentPlayerScoreChanges: (payload.diagnostics.recentPlayerScoreChanges || []).slice(0, 8)
   };
 
   $('diagnosticsOutput').textContent = JSON.stringify(output, null, 2);
@@ -588,6 +733,45 @@ async function forceNext() {
   await fetchJson('/api/control/next', { method: 'POST' });
 }
 
+async function setRotationPaused(paused) {
+  await fetchJson('/api/control/pause', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ paused: Boolean(paused) })
+  });
+}
+
+async function triggerStoryCard() {
+  await fetchJson('/api/control/story', { method: 'POST' });
+}
+
+async function pinMatchup(matchupId) {
+  await fetchJson('/api/control/pin', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ matchupId: String(matchupId || '').trim() })
+  });
+}
+
+async function replaySnapshotById(snapshotId) {
+  const numericId = Number(snapshotId);
+  if (!Number.isFinite(numericId) || numericId <= 0) {
+    throw new Error('Enter a valid snapshot id first.');
+  }
+
+  await fetchJson('/api/history/replay', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ snapshotId: numericId })
+  });
+}
+
 async function logoutTokens() {
   await fetchJson('/api/auth/logout', { method: 'POST' });
   await refreshStatus();
@@ -615,7 +799,9 @@ async function exportConfig() {
 }
 
 async function exportHistory(format = 'json') {
-  const response = await fetch(`/api/history/export?format=${encodeURIComponent(format)}&hours=168`, {
+  const week = numberValue($('historyWeekFilter'), null);
+  const weekQuery = Number.isFinite(week) && week > 0 ? `&week=${encodeURIComponent(String(week))}` : '';
+  const response = await fetch(`/api/history/export?format=${encodeURIComponent(format)}&hours=168${weekQuery}`, {
     headers: withAdminHeaders({})
   });
 
@@ -731,6 +917,14 @@ function bindEvents() {
     setWeekMode(event.target.value, numberValue($('weekNumber'), 1));
   });
 
+  $('espnWeekMode').addEventListener('change', (event) => {
+    setScopedWeekMode('espnWeekMode', 'espnWeekNumber', event.target.value, numberValue($('espnWeekNumber'), 1), 1);
+  });
+
+  $('sleeperWeekMode').addEventListener('change', (event) => {
+    setScopedWeekMode('sleeperWeekMode', 'sleeperWeekNumber', event.target.value, numberValue($('sleeperWeekNumber'), 1), 1);
+  });
+
   ['primaryColor', 'secondaryColor', 'textColor', 'mutedTextColor', 'bgColor'].forEach((id) => {
     $(id).addEventListener('input', applyThemePreview);
   });
@@ -756,6 +950,39 @@ function bindEvents() {
 
   $('nextBtn').addEventListener('click', () => {
     forceNext().catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('pauseRotationBtn').addEventListener('click', () => {
+    setRotationPaused(true)
+      .then(() => notify('testResult', 'Overlay rotation paused.', true))
+      .catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('resumeRotationBtn').addEventListener('click', () => {
+    setRotationPaused(false)
+      .then(() => notify('testResult', 'Overlay rotation resumed.', true))
+      .catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('storyNowBtn').addEventListener('click', () => {
+    triggerStoryCard()
+      .then(() => notify('testResult', 'Story card trigger sent.', true))
+      .catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('pinMatchupBtn').addEventListener('click', () => {
+    pinMatchup($('pinnedMatchupId').value)
+      .then(() => notify('testResult', 'Pinned matchup updated.', true))
+      .catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('clearPinBtn').addEventListener('click', () => {
+    pinMatchup('')
+      .then(() => {
+        $('pinnedMatchupId').value = '';
+        notify('testResult', 'Pinned matchup cleared.', true);
+      })
+      .catch((error) => notify('testResult', error.message, false));
   });
 
   $('oauthStartBtn').addEventListener('click', () => {
@@ -844,12 +1071,25 @@ function bindEvents() {
     refreshDiagnostics().catch((error) => notify('testResult', error.message, false));
   });
 
+  $('replaySnapshotBtn').addEventListener('click', () => {
+    replaySnapshotById($('replaySnapshotId').value)
+      .then(() => notify('testResult', 'Snapshot replayed to overlay.', true))
+      .catch((error) => notify('testResult', error.message, false));
+  });
+
   $('exportHistoryJsonBtn').addEventListener('click', () => {
     exportHistory('json').catch((error) => notify('testResult', error.message, false));
   });
 
   $('exportHistoryCsvBtn').addEventListener('click', () => {
     exportHistory('csv').catch((error) => notify('testResult', error.message, false));
+  });
+
+  $('overlayApiKeyInput').addEventListener('input', () => {
+    const overlayUrl = appendOverlayKey(`${window.location.origin}/overlay`);
+    $('overlayUrl').value = overlayUrl;
+    $('openOverlayPreviewLink').href = overlayUrl;
+    renderPresetLinks(`${window.location.origin}/overlay`);
   });
 
   state.statusTimer = setInterval(() => {

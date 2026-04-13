@@ -1,0 +1,13 @@
+<section class="matchup-card story-card">
+<header class="matchup-head">
+<div class="badges">
+<span class="badge">Story</span>
+<span class="badge">Closest</span>
+</div>
+<span class="week-label">Weekly Pulse</span>
+</header>
+<article class="story-content">
+<p class="story-title">Sunday Surge vs Gridiron Reapers is razor thin</p>
+<p class="story-body">Only 3.4 points apart right now.</p>
+</article>
+</section>

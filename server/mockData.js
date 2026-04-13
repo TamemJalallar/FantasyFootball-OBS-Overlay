@@ -48,9 +48,10 @@ function createTeam(seed, idx) {
   };
 }
 
-function createMockMatchups({ week = 1, pinnedMatchupId = '' } = {}) {
+function createMockMatchups({ week = 1, pinnedMatchupId = '', seedOverride = null } = {}) {
   const now = Date.now() / 1000;
-  const seed = Math.floor(now / 45);
+  const parsedSeed = Number(seedOverride);
+  const seed = Number.isFinite(parsedSeed) ? parsedSeed : Math.floor(now / 45);
   const matchups = [];
 
   for (let i = 0; i < 5; i += 1) {

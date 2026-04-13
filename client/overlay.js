@@ -1,5 +1,18 @@
 const $ = (id) => document.getElementById(id);
 
+const templates = window.OverlayTemplates || {};
+const escapeHtml = templates.escapeHtml || ((value) => String(value ?? ''));
+const formatScore = templates.formatScore || ((value) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '--';
+  }
+  return Number(value).toFixed(2).replace(/\.00$/, '.0');
+});
+const createMatchupCard = templates.createMatchupCard || (() => '<section class="matchup-card"><p>Template unavailable.</p></section>');
+const createStoryCard = templates.createStoryCard || ((story) => `<section class="matchup-card"><p>${escapeHtml(story?.title || 'Story')}</p></section>`);
+
+const query = new URLSearchParams(window.location.search);
+
 const state = {
   settings: null,
   payload: null,
@@ -15,41 +28,37 @@ const state = {
   redzoneLockUntil: 0,
   recentLeadChanges: [],
   recentUpsetEvents: [],
-  recentPlayerScoreChanges: []
+  recentPlayerScoreChanges: [],
+  pinnedMatchupId: '',
+  rotationPaused: false,
+  forceStoryRequested: false,
+  usingFallbackPolling: false,
+  fallbackTimer: null,
+  fallbackErrorCount: 0,
+  reconnectTimer: null,
+  sseRetryAttempt: 0,
+  sseConnected: false,
+  overlayKey: String(query.get('overlayKey') || '').trim()
 };
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function formatScore(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return '--';
+function withOverlayKey(path) {
+  if (!state.overlayKey) {
+    return path;
   }
-  return Number(value).toFixed(2).replace(/\.00$/, '.0');
+
+  const hasQuery = path.includes('?');
+  return `${path}${hasQuery ? '&' : '?'}overlayKey=${encodeURIComponent(state.overlayKey)}`;
 }
 
-function formatRecord(record, enabled) {
-  if (!enabled || !record) {
-    return '';
+function setTransportIndicator({ fallback, detail = '' }) {
+  const node = $('transportPill');
+  if (!fallback) {
+    node.classList.add('hidden');
+    return;
   }
-  return `Record ${record}`;
-}
 
-function initials(name) {
-  const parts = String(name || '').trim().split(/\s+/).slice(0, 2);
-  return parts.map((x) => x[0] || '').join('').toUpperCase() || 'FF';
-}
-
-function statusClass(status) {
-  if (status === 'live') return 'live';
-  if (status === 'final') return 'final';
-  return 'upcoming';
+  node.textContent = detail ? `Fallback Polling (${detail})` : 'Fallback Polling';
+  node.classList.remove('hidden');
 }
 
 function computePayloadRenderKey(payload) {
@@ -73,25 +82,24 @@ function computePayloadRenderKey(payload) {
 }
 
 function parseQueryOverrides(settings) {
-  const params = new URLSearchParams(window.location.search);
   const override = JSON.parse(JSON.stringify(settings));
 
-  if (params.get('mode')) {
-    override.overlay.mode = params.get('mode');
+  if (query.get('mode')) {
+    override.overlay.mode = query.get('mode');
   }
 
-  if (params.get('preset')) {
-    override.overlay.scenePreset = params.get('preset');
+  if (query.get('preset')) {
+    override.overlay.scenePreset = query.get('preset');
   }
 
-  if (params.get('scale')) {
-    const scale = Number(params.get('scale'));
+  if (query.get('scale')) {
+    const scale = Number(query.get('scale'));
     if (Number.isFinite(scale) && scale > 0.3 && scale < 3) {
       document.documentElement.style.setProperty('--overlay-scale', String(scale));
     }
   }
 
-  if (params.get('twoUp') === '1') {
+  if (query.get('twoUp') === '1') {
     override.overlay.twoMatchupLayout = true;
   }
 
@@ -119,6 +127,11 @@ function applyTheme(settings) {
   document.documentElement.style.setProperty('--text-main', settings.theme.text || '#f6f8ff');
   document.documentElement.style.setProperty('--text-muted', settings.theme.mutedText || '#aab3ca');
   document.documentElement.style.setProperty('--font-scale', String(settings.theme.fontScale || 1));
+
+  const displayFont = settings.overlay?.branding?.fontDisplay || 'Rajdhani';
+  const bodyFont = settings.overlay?.branding?.fontBody || displayFont || 'Rajdhani';
+  document.documentElement.style.setProperty('--font-display', `'${displayFont}', sans-serif`);
+  document.documentElement.style.setProperty('--font-body', `'${bodyFont}', sans-serif`);
 }
 
 function setDevUpdated(updatedAt) {
@@ -146,8 +159,48 @@ function setDegradedIndicator(status) {
   node.classList.remove('hidden');
 }
 
+function renderBranding() {
+  const titleNode = $('leagueTitle');
+  const watermarkNode = $('brandWatermark');
+  const branding = state.settings?.overlay?.branding || {};
+
+  if (!branding.enabled) {
+    titleNode.classList.add('hidden');
+    watermarkNode.classList.add('hidden');
+    watermarkNode.innerHTML = '';
+    return;
+  }
+
+  if (branding.leagueTitle) {
+    titleNode.textContent = branding.leagueTitle;
+    titleNode.classList.remove('hidden');
+  } else {
+    titleNode.classList.add('hidden');
+  }
+
+  if (!branding.watermarkEnabled) {
+    watermarkNode.classList.add('hidden');
+    watermarkNode.innerHTML = '';
+    return;
+  }
+
+  const logo = branding.watermarkLogoUrl
+    ? `<img class="watermark-logo" src="${escapeHtml(branding.watermarkLogoUrl)}" alt="brand" />`
+    : '';
+  const text = escapeHtml(branding.watermarkText || 'Fantasy Overlay');
+
+  watermarkNode.innerHTML = `${logo}<span>${text}</span>`;
+  watermarkNode.classList.remove('hidden');
+}
+
 function getAutoRedzoneConfig() {
-  return state.settings?.overlay?.autoRedzone || { enabled: false, lockMs: 25000 };
+  const source = state.settings?.overlay?.autoRedzone || {};
+  return {
+    enabled: Boolean(source.enabled),
+    lockMs: Number(source.lockMs || 25000),
+    focusLimit: Number(source.focusLimit || 3),
+    maxScoreDiff: Number(source.maxScoreDiff || 12)
+  };
 }
 
 function getStoryCardConfig() {
@@ -171,6 +224,13 @@ function getRotatingMatchups() {
     return [];
   }
 
+  if (state.pinnedMatchupId) {
+    const pinned = all.find((item) => item.id === state.pinnedMatchupId);
+    if (pinned) {
+      return [pinned];
+    }
+  }
+
   if (!isRedzoneLockActive()) {
     return all;
   }
@@ -192,31 +252,36 @@ function primeRedzoneFocus({ payload, scoreChanges = [], tdEvents = [], leadChan
   }
 
   const focusIds = new Set();
-
   for (const change of scoreChanges) {
-    if (change?.matchupId) {
-      focusIds.add(change.matchupId);
-    }
+    if (change?.matchupId) focusIds.add(change.matchupId);
   }
   for (const lead of leadChanges) {
-    if (lead?.matchupId) {
-      focusIds.add(lead.matchupId);
-    }
+    if (lead?.matchupId) focusIds.add(lead.matchupId);
   }
   for (const upset of upsetEvents) {
-    if (upset?.matchupId) {
-      focusIds.add(upset.matchupId);
-    }
+    if (upset?.matchupId) focusIds.add(upset.matchupId);
   }
   for (const td of tdEvents) {
-    if (td?.matchupId) {
-      focusIds.add(td.matchupId);
-    }
+    if (td?.matchupId) focusIds.add(td.matchupId);
   }
 
-  for (const matchup of payload?.matchups || []) {
-    if (matchup.isLive && (matchup.isClosest || matchup.isUpset)) {
-      focusIds.add(matchup.id);
+  const ranked = [...(payload?.matchups || [])]
+    .filter((matchup) => matchup?.isLive)
+    .map((matchup) => {
+      const diff = Number(matchup.scoreDiff || 99);
+      let urgency = 0;
+      if (matchup.isClosest) urgency += 4;
+      if (matchup.isUpset) urgency += 4;
+      if (diff <= config.maxScoreDiff) urgency += 3;
+      if (focusIds.has(matchup.id)) urgency += 5;
+      return { id: matchup.id, urgency };
+    })
+    .sort((a, b) => b.urgency - a.urgency)
+    .slice(0, Math.max(1, config.focusLimit));
+
+  for (const entry of ranked) {
+    if (entry.urgency > 0) {
+      focusIds.add(entry.id);
     }
   }
 
@@ -233,8 +298,7 @@ function clearTdAlerts() {
     clearTimeout(timer);
   }
   state.tdAlertTimers = [];
-  const container = $('tdAlerts');
-  container.innerHTML = '';
+  $('tdAlerts').innerHTML = '';
 }
 
 function renderTdEvents(tdEvents = []) {
@@ -296,122 +360,13 @@ function renderTdEvents(tdEvents = []) {
       } else {
         card.classList.remove('show');
         card.classList.add('hide');
-        const removeTimer = setTimeout(() => {
-          card.remove();
-        }, 360);
+        const removeTimer = setTimeout(() => card.remove(), 360);
         state.tdAlertTimers.push(removeTimer);
       }
     }, duration);
 
     state.tdAlertTimers.push(hideTimer);
   }
-}
-
-function createLogoNode(team) {
-  if (state.settings.overlay.showLogos && team.logo) {
-    const src = escapeHtml(team.logo);
-    const alt = escapeHtml(`${team.name} logo`);
-    return `<img class="logo" src="${src}" alt="${alt}" loading="lazy" />`;
-  }
-
-  const text = escapeHtml(initials(team.name));
-  return `<div class="logo logo-fallback" aria-hidden="true">${text}</div>`;
-}
-
-function createTeamRow(team, isLeading, sideLabel) {
-  const changed = state.changedTeamKeys.has(team.key) ? 'score-pop' : '';
-  const scoreDelta = state.scoreDeltaByTeamKey.get(team.key);
-  const extra = [
-    formatRecord(team.record, state.settings.overlay.showRecords),
-    state.settings.overlay.showProjections && team.projected !== null ? `Proj ${formatScore(team.projected)}` : '',
-    team.winProbability !== null && team.winProbability !== undefined ? `Win ${Number(team.winProbability).toFixed(1)}%` : ''
-  ].filter(Boolean).join(' • ');
-
-  return `
-    <article class="team-row ${isLeading ? 'leading' : ''}">
-      ${createLogoNode(team)}
-      <div class="team-meta">
-        <p class="team-name">${escapeHtml(team.name)}</p>
-        <p class="team-manager">${escapeHtml(sideLabel)}: ${escapeHtml(team.manager || 'Manager')}</p>
-        ${extra ? `<p class="team-extra">${escapeHtml(extra)}</p>` : ''}
-      </div>
-      <div class="team-score ${changed}">
-        <span>${formatScore(team.points)}</span>
-        ${(state.settings.overlay.showScoreDelta && scoreDelta !== undefined && scoreDelta !== null)
-    ? `<small class="score-delta ${scoreDelta >= 0 ? 'up' : 'down'}">${scoreDelta >= 0 ? '+' : ''}${Number(scoreDelta).toFixed(2)}</small>`
-    : ''}
-      </div>
-    </article>
-  `;
-}
-
-function createBadgeList(matchup) {
-  const badges = [`<span class="badge ${statusClass(matchup.status)}">${matchup.status}</span>`];
-
-  if (matchup.isGameOfWeek) {
-    badges.push('<span class="badge">Game of the Week</span>');
-  }
-
-  if (matchup.isClosest) {
-    badges.push('<span class="badge">Closest</span>');
-  }
-
-  if (matchup.isUpset) {
-    badges.push('<span class="badge">Upset Alert</span>');
-  }
-
-  if (isRedzoneLockActive() && state.redzoneFocusIds.has(matchup.id)) {
-    badges.push('<span class="badge">Redzone Focus</span>');
-  }
-
-  return badges.join('');
-}
-
-function createMatchupCard(matchup) {
-  const a = matchup.teamA;
-  const b = matchup.teamB;
-  const aLeads = (a.points ?? 0) >= (b.points ?? 0);
-
-  const cardClasses = [
-    'matchup-card',
-    matchup.status === 'final' ? 'final' : '',
-    matchup.isClosest ? 'closest' : '',
-    matchup.isUpset ? 'upset' : ''
-  ].filter(Boolean).join(' ');
-
-  return `
-    <section class="${cardClasses}">
-      <header class="matchup-head">
-        <div class="badges">${createBadgeList(matchup)}</div>
-        <span class="week-label">Week ${matchup.week}</span>
-      </header>
-
-      ${createTeamRow(a, aLeads, 'Home')}
-      ${createTeamRow(b, !aLeads, 'Away')}
-
-      ${state.settings.overlay.showProjections
-    ? `<div class="projection"><span>Projected Winner: ${escapeHtml(matchup.projectedWinnerKey === a.key ? a.name : b.name)}</span><span>Diff ${formatScore(matchup.scoreDiff)}</span></div>`
-    : ''}
-    </section>
-  `;
-}
-
-function createStoryCard(story) {
-  return `
-    <section class="matchup-card story-card">
-      <header class="matchup-head">
-        <div class="badges">
-          <span class="badge">Story</span>
-          ${story.badge ? `<span class="badge">${escapeHtml(story.badge)}</span>` : ''}
-        </div>
-        <span class="week-label">Weekly Pulse</span>
-      </header>
-      <article class="story-content">
-        <p class="story-title">${escapeHtml(story.title || 'Matchup Story')}</p>
-        <p class="story-body">${escapeHtml(story.body || '')}</p>
-      </article>
-    </section>
-  `;
 }
 
 function buildStoryCards(matchups) {
@@ -491,6 +446,11 @@ function getRotationItems() {
     return base;
   }
 
+  if (state.forceStoryRequested) {
+    state.forceStoryRequested = false;
+    return [{ kind: 'story', id: stories[0].id, story: stories[0] }, ...base];
+  }
+
   const interval = Math.max(1, Number(storyConfig.interval || 2));
   const merged = [];
   let storyIndex = 0;
@@ -532,8 +492,22 @@ function renderCarousel() {
 
     stage.innerHTML = `
       <div class="matchup-wrap two-up">
-        ${createMatchupCard(m1)}
-        ${createMatchupCard(m2)}
+        ${createMatchupCard({
+    matchup: m1,
+    settings: state.settings,
+    changedTeamKeys: state.changedTeamKeys,
+    scoreDeltaByTeamKey: state.scoreDeltaByTeamKey,
+    redzoneLockActive: isRedzoneLockActive(),
+    redzoneFocusIds: state.redzoneFocusIds
+  })}
+        ${createMatchupCard({
+    matchup: m2,
+    settings: state.settings,
+    changedTeamKeys: state.changedTeamKeys,
+    scoreDeltaByTeamKey: state.scoreDeltaByTeamKey,
+    redzoneLockActive: isRedzoneLockActive(),
+    redzoneFocusIds: state.redzoneFocusIds
+  })}
       </div>
     `;
   } else {
@@ -542,7 +516,14 @@ function renderCarousel() {
       <div class="matchup-wrap">
         ${currentItem.kind === 'story'
     ? createStoryCard(currentItem.story)
-    : createMatchupCard(currentItem.matchup)}
+    : createMatchupCard({
+      matchup: currentItem.matchup,
+      settings: state.settings,
+      changedTeamKeys: state.changedTeamKeys,
+      scoreDeltaByTeamKey: state.scoreDeltaByTeamKey,
+      redzoneLockActive: isRedzoneLockActive(),
+      redzoneFocusIds: state.redzoneFocusIds
+    })}
       </div>
     `;
   }
@@ -602,6 +583,7 @@ function render() {
   setBodyClasses(state.settings);
   setDevUpdated(state.payload?.updatedAt || state.status?.lastSuccessAt);
   setDegradedIndicator(state.status);
+  renderBranding();
 
   if (state.settings.overlay.mode === 'ticker') {
     renderTickerMode();
@@ -643,6 +625,10 @@ function startRotation() {
     return;
   }
 
+  if (state.rotationPaused) {
+    return;
+  }
+
   const length = getRotationItems().length;
   if (length <= 1) {
     return;
@@ -650,6 +636,12 @@ function startRotation() {
 
   const ms = Number(state.settings.overlay.rotationIntervalMs || 9000);
   state.rotationTimer = setInterval(nextMatchup, ms);
+}
+
+function applyControlStateFromStatus() {
+  const control = state.status?.controlState || {};
+  state.rotationPaused = Boolean(control.rotationPaused);
+  state.pinnedMatchupId = String(control.pinnedMatchupId || '').trim();
 }
 
 function onPayloadUpdate(payload, scoreChanges = [], tdEvents = [], leadChanges = [], upsetEvents = [], playerScoreChanges = []) {
@@ -696,6 +688,8 @@ function onPayloadUpdate(payload, scoreChanges = [], tdEvents = [], leadChanges 
     state.recentPlayerScoreChanges = [...playerScoreChanges, ...state.recentPlayerScoreChanges].slice(0, 40);
   }
 
+  applyControlStateFromStatus();
+
   if (shouldRender) {
     render();
   }
@@ -704,20 +698,147 @@ function onPayloadUpdate(payload, scoreChanges = [], tdEvents = [], leadChanges 
   startRotation();
 }
 
+function onControlMessage(data) {
+  if (data.action === 'next') {
+    nextMatchup();
+    return;
+  }
+
+  if (data.action === 'set_rotation_paused') {
+    state.rotationPaused = Boolean(data.paused);
+    if (state.rotationPaused) {
+      stopRotation();
+    } else {
+      startRotation();
+    }
+    return;
+  }
+
+  if (data.action === 'pin_matchup' || data.action === 'clear_pin_matchup') {
+    state.pinnedMatchupId = String(data.matchupId || '').trim();
+    state.activeIndex = 0;
+    render();
+    startRotation();
+    return;
+  }
+
+  if (data.action === 'force_story_card') {
+    state.forceStoryRequested = true;
+    state.activeIndex = 0;
+    render();
+  }
+}
+
+async function fetchPublicSnapshot() {
+  const response = await fetch(withOverlayKey('/api/public-snapshot'), { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`snapshot_http_${response.status}`);
+  }
+  return response.json();
+}
+
+function clearFallbackTimer() {
+  if (state.fallbackTimer) {
+    clearTimeout(state.fallbackTimer);
+    state.fallbackTimer = null;
+  }
+}
+
+function stopFallbackPolling() {
+  state.usingFallbackPolling = false;
+  state.fallbackErrorCount = 0;
+  clearFallbackTimer();
+  setTransportIndicator({ fallback: false });
+}
+
+function scheduleFallbackPoll(delayMs = 4000) {
+  clearFallbackTimer();
+  const ms = Math.max(1200, Number(delayMs) || 4000);
+
+  state.fallbackTimer = setTimeout(async () => {
+    if (!state.usingFallbackPolling) {
+      return;
+    }
+
+    try {
+      const data = await fetchPublicSnapshot();
+      if (data.settings) {
+        state.settings = parseQueryOverrides(data.settings);
+      }
+      state.status = data.status || state.status;
+      onPayloadUpdate(data.payload || { matchups: [] }, [], [], [], [], []);
+      state.fallbackErrorCount = 0;
+      setTransportIndicator({ fallback: true, detail: 'reconnecting stream' });
+
+      const nextDelay = Number(state.settings?.data?.scoreboardPollMs || 10000);
+      scheduleFallbackPoll(nextDelay);
+    } catch {
+      state.fallbackErrorCount += 1;
+      const backoff = Math.min(30000, 2000 * (2 ** Math.min(5, state.fallbackErrorCount)));
+      setTransportIndicator({ fallback: true, detail: `retry ${Math.round(backoff / 1000)}s` });
+      scheduleFallbackPoll(backoff);
+    }
+  }, ms);
+}
+
+function startFallbackPolling() {
+  if (state.usingFallbackPolling) {
+    return;
+  }
+
+  state.usingFallbackPolling = true;
+  setTransportIndicator({ fallback: true, detail: 'stream lost' });
+  scheduleFallbackPoll(1500);
+}
+
+function clearReconnectTimer() {
+  if (state.reconnectTimer) {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectTimer = null;
+  }
+}
+
+function scheduleSseReconnect() {
+  if (state.reconnectTimer) {
+    return;
+  }
+
+  state.sseRetryAttempt += 1;
+  const delay = Math.min(30000, 1000 * (2 ** Math.min(6, state.sseRetryAttempt)));
+  state.reconnectTimer = setTimeout(() => {
+    state.reconnectTimer = null;
+    connectSse();
+  }, delay);
+}
+
 function connectSse() {
-  const es = new EventSource('/events');
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+
+  const es = new EventSource(withOverlayKey('/events'));
   state.eventSource = es;
+
+  es.onopen = () => {
+    state.sseConnected = true;
+    state.sseRetryAttempt = 0;
+    clearReconnectTimer();
+    stopFallbackPolling();
+  };
 
   es.addEventListener('init', (event) => {
     const data = JSON.parse(event.data || '{}');
     state.settings = parseQueryOverrides(data.settings);
     state.status = data.status;
+    applyControlStateFromStatus();
     onPayloadUpdate(data.payload || { matchups: [] }, [], [], [], [], []);
   });
 
   es.addEventListener('update', (event) => {
     const data = JSON.parse(event.data || '{}');
     state.status = data.status || state.status;
+    applyControlStateFromStatus();
     onPayloadUpdate(
       data.payload || state.payload,
       data.scoreChanges || [],
@@ -731,6 +852,7 @@ function connectSse() {
   es.addEventListener('status', (event) => {
     const data = JSON.parse(event.data || '{}');
     state.status = data;
+    applyControlStateFromStatus();
     setDevUpdated(data.lastSuccessAt);
     setDegradedIndicator(data);
   });
@@ -751,20 +873,19 @@ function connectSse() {
 
   es.addEventListener('control', (event) => {
     const data = JSON.parse(event.data || '{}');
-    if (data.action === 'next') {
-      nextMatchup();
-    }
+    onControlMessage(data);
   });
 
   es.onerror = () => {
-    if (state.eventSource) {
-      setDevUpdated(state.status?.lastSuccessAt || null);
-    }
+    state.sseConnected = false;
+    startFallbackPolling();
+    scheduleSseReconnect();
   };
 }
 
 window.addEventListener('keydown', (event) => {
-  if (event.key.toLowerCase() === 'n' || event.key === 'ArrowRight') {
+  const key = event.key.toLowerCase();
+  if (key === 'n' || event.key === 'ArrowRight') {
     nextMatchup();
   }
 });

@@ -71,6 +71,8 @@ class AudioQueue {
 
       const event = this.queue.shift();
       this.metrics?.set('audio_queue_size', this.queue.length);
+      const templates = audio.templates || {};
+      const templateId = String(templates[event.type] || templates.default || '').trim();
 
       try {
         const response = await fetch(audio.endpointUrl, {
@@ -81,6 +83,7 @@ class AudioQueue {
           body: JSON.stringify({
             type: 'audio_event',
             eventType: event.type,
+            templateId,
             priority: event.priority,
             payload: event.payload,
             ts: event.ts

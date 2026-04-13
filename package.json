@@ -6,8 +6,11 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
-    "check:syntax": "node --check server/index.js && node --check server/dataService.js && node --check server/configStore.js && node --check server/defaultSettings.js && node --check server/yahooApi.js && node --check server/tokenStore.js && node --check server/secretStore.js && node --check server/keychainStore.js && node --check server/metrics.js && node --check server/audioQueue.js && node --check server/historyStore.js && node --check server/profileStore.js && node --check server/obsController.js && node --check server/tdStateStore.js && node --check client/admin.js && node --check client/overlay.js",
+    "check:syntax": "node --check server/index.js && node --check server/dataService.js && node --check server/configStore.js && node --check server/defaultSettings.js && node --check server/yahooApi.js && node --check server/espnApi.js && node --check server/sleeperApi.js && node --check server/providerRegistry.js && node --check server/integrations.js && node --check server/tokenStore.js && node --check server/secretStore.js && node --check server/keychainStore.js && node --check server/metrics.js && node --check server/audioQueue.js && node --check server/historyStore.js && node --check server/profileStore.js && node --check server/obsController.js && node --check server/tdStateStore.js && node --check client/admin.js && node --check client/overlay.js && node --check client/overlayTemplates.js && node --check scripts/refresh-screenshots.js && node --check scripts/check-screenshot-manifest.js && node --check scripts/generate-changelog.js",
     "demo:gif": "node scripts/generate-demo-gif.js",
+    "screenshots:refresh": "node scripts/refresh-screenshots.js",
+    "visual:check": "node scripts/check-screenshot-manifest.js",
+    "changelog:generate": "node scripts/generate-changelog.js",
     "test": "node --test",
     "lint": "echo 'No linter configured yet'"
   },

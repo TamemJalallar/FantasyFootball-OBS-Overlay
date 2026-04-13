@@ -1,0 +1,72 @@
+name: Release Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver version (example: 1.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Version must be semver format, example: 1.2.0"
+            exit 1
+          fi
+
+      - name: Run checks
+        run: |
+          npm run check:syntax
+          npm test
+
+      - name: Bump version
+        run: npm version "${{ inputs.version }}" --no-git-tag-version
+
+      - name: Refresh screenshots + changelog
+        run: |
+          npm run screenshots:refresh
+          npm run changelog:generate -- "${{ inputs.version }}"
+          npm run visual:check
+
+      - name: Commit release assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json docs/screenshots/manifest.json docs/screenshots/overlay-demo.gif
+          if [ -f CHANGELOG.md ]; then git add CHANGELOG.md; fi
+          git commit -m "release: v${{ inputs.version }}" || echo "No changes to commit"
+
+      - name: Tag release
+        run: |
+          git tag "v${{ inputs.version }}" || true
+          git push
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          generate_release_notes: true

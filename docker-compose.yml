@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   overlay:
     build: .
@@ -12,4 +11,32 @@ services:
     volumes:
       - ./config:/app/config
       - ./cache:/app/cache
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3030/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    profiles: ["local"]
+    restart: unless-stopped
+
+  overlay-mock:
+    build: .
+    container_name: yahoo-fantasy-overlay-mock
+    ports:
+      - "3031:3030"
+    environment:
+      PORT: 3030
+      APP_BASE_URL: http://localhost:3031
+      MOCK_MODE: "true"
+    volumes:
+      - ./config:/app/config
+      - ./cache:/app/cache
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3030/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    profiles: ["mock"]
     restart: unless-stopped

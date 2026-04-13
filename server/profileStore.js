@@ -20,8 +20,28 @@ function sanitizeSettings(settings) {
     copy.yahoo.clientSecret = '';
   }
 
+  if (copy?.espn?.swid) {
+    copy.espn.swid = '';
+  }
+
+  if (copy?.espn?.espnS2) {
+    copy.espn.espnS2 = '';
+  }
+
   if (copy?.security?.adminApiKey) {
     copy.security.adminApiKey = '';
+  }
+
+  if (copy?.security?.overlayApiKey) {
+    copy.security.overlayApiKey = '';
+  }
+
+  if (copy?.integrations?.discordWebhookUrl) {
+    copy.integrations.discordWebhookUrl = '';
+  }
+
+  if (copy?.integrations?.slackWebhookUrl) {
+    copy.integrations.slackWebhookUrl = '';
   }
 
   return copy;

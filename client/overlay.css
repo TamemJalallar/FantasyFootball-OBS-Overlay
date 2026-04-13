@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Oxanium:wght@500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Oxanium:wght@500;700&family=Orbitron:wght@500;700&family=Teko:wght@500;600;700&family=Barlow:wght@400;500;700&family=Saira+Condensed:wght@500;600;700&display=swap');
 
 :root {
   --primary: #13f1b7;
@@ -8,6 +8,8 @@
   --text-muted: #aab3ca;
   --font-scale: 1;
   --overlay-scale: 1;
+  --font-display: 'Rajdhani', sans-serif;
+  --font-body: 'Rajdhani', sans-serif;
 }
 
 * {
@@ -27,7 +29,7 @@ body {
   transform: scale(var(--overlay-scale));
   transform-origin: top left;
   color: var(--text-main);
-  font-family: 'Rajdhani', sans-serif;
+  font-family: var(--font-body);
 }
 
 .hidden {
@@ -38,6 +40,21 @@ body {
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.league-title {
+  position: absolute;
+  top: 20px;
+  left: 28px;
+  z-index: 5;
+  border: 1px solid rgba(122, 146, 190, 0.4);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(7, 13, 25, 0.75);
+  font-family: var(--font-display);
+  font-size: calc(20px * var(--font-scale));
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .scene-shell {
@@ -125,7 +142,7 @@ body {
 
 .story-title {
   margin: 0;
-  font-family: 'Oxanium', sans-serif;
+  font-family: var(--font-display);
   font-size: calc(30px * var(--font-scale));
   line-height: 1.05;
 }
@@ -214,7 +231,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Oxanium', sans-serif;
+  font-family: var(--font-display);
   font-size: calc(16px * var(--font-scale));
   letter-spacing: 0.06em;
   color: #e9f0ff;
@@ -229,7 +246,7 @@ body {
   margin: 0;
   font-size: calc(28px * var(--font-scale));
   line-height: 1;
-  font-family: 'Oxanium', sans-serif;
+  font-family: var(--font-display);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -252,7 +269,7 @@ body {
 
 .team-score {
   text-align: right;
-  font-family: 'Oxanium', sans-serif;
+  font-family: var(--font-display);
   font-size: calc(42px * var(--font-scale));
   line-height: 1;
   letter-spacing: 0.03em;
@@ -311,7 +328,7 @@ body {
   border-radius: 999px;
   padding: 8px 14px;
   background: rgba(6, 11, 21, 0.72);
-  font-family: 'Oxanium', sans-serif;
+  font-family: var(--font-display);
   font-size: calc(21px * var(--font-scale));
 }
 
@@ -406,6 +423,39 @@ body {
   border: 1px solid rgba(255, 142, 163, 0.62);
   color: #ffd4dd;
   background: rgba(50, 12, 24, 0.72);
+}
+
+.transport-pill {
+  position: absolute;
+  top: 10px;
+  left: 170px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(250, 212, 122, 0.62);
+  color: #ffe5b0;
+  background: rgba(45, 28, 8, 0.72);
+}
+
+.brand-watermark {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 4;
+  color: rgba(245, 249, 255, 0.65);
+  font-size: calc(14px * var(--font-scale));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.brand-watermark .watermark-logo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  opacity: 0.72;
 }
 
 body.preset-centered-card .scene-shell {
@@ -548,6 +598,19 @@ body.reduced-motion .footer-ticker .line {
 @media (max-width: 900px) {
   .scene-shell {
     padding: 12px;
+  }
+
+  .league-title {
+    top: 8px;
+    left: 12px;
+    font-size: calc(14px * var(--font-scale));
+    padding: 6px 8px;
+  }
+
+  .brand-watermark {
+    right: 10px;
+    bottom: 10px;
+    font-size: calc(11px * var(--font-scale));
   }
 
   .matchup-wrap.two-up {

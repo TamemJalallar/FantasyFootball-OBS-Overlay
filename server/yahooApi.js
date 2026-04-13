@@ -21,6 +21,37 @@ class YahooApiClient {
       parseTagValue: false,
       trimValues: true
     });
+    this.requestTimestamps = [];
+    this.lastRateLimitHeaders = null;
+  }
+
+  trackRequest() {
+    const now = Date.now();
+    this.requestTimestamps.push(now);
+    const cutoff = now - 60 * 60 * 1000;
+    while (this.requestTimestamps.length && this.requestTimestamps[0] < cutoff) {
+      this.requestTimestamps.shift();
+    }
+  }
+
+  getBudgetTelemetry(settings = null) {
+    const now = Date.now();
+    const lastMinute = this.requestTimestamps.filter((ts) => ts >= now - 60_000).length;
+    const lastHour = this.requestTimestamps.filter((ts) => ts >= now - 60 * 60 * 1000).length;
+
+    const perHour = Number(settings?.data?.rateLimitBudget?.perHour || 1800);
+    const warnThresholdPct = Number(settings?.data?.rateLimitBudget?.warnThresholdPct || 0.8);
+    const usagePct = perHour > 0 ? lastHour / perHour : 0;
+
+    return {
+      lastMinute,
+      lastHour,
+      perHour,
+      usagePct: Number(usagePct.toFixed(4)),
+      warnThresholdPct,
+      warning: usagePct >= warnThresholdPct,
+      lastRateLimitHeaders: this.lastRateLimitHeaders
+    };
   }
 
   async request(pathWithParams) {
@@ -57,8 +88,17 @@ class YahooApiClient {
         throw error;
       }
 
+      this.trackRequest();
+      this.lastRateLimitHeaders = {
+        limit: response.headers.get('x-ratelimit-limit') || null,
+        remaining: response.headers.get('x-ratelimit-remaining') || null,
+        reset: response.headers.get('x-ratelimit-reset') || null
+      };
+
       this.metrics?.inc('yahoo_requests_total');
       this.metrics?.set('yahoo_last_request_duration_ms', Date.now() - startedAt);
+      this.metrics?.set('yahoo_requests_last_minute', this.getBudgetTelemetry().lastMinute);
+      this.metrics?.set('yahoo_requests_last_hour', this.getBudgetTelemetry().lastHour);
       return this.parser.parse(text);
     } catch (error) {
       this.metrics?.inc('yahoo_requests_failed_total');

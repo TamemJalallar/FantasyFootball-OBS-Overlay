@@ -125,7 +125,7 @@ class HistoryStore {
     deleteEvents.run(cutoff);
   }
 
-  recentSnapshots({ hours = 24, limit = 40 } = {}) {
+  recentSnapshots({ hours = 24, limit = 40, week = null } = {}) {
     if (!this.isReady()) {
       return [];
     }
@@ -133,15 +133,29 @@ class HistoryStore {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 40));
     const cutoff = new Date(Date.now() - Math.max(1, Number(hours) || 24) * 60 * 60 * 1000).toISOString();
 
-    const stmt = this.db.prepare(`
+    const hasWeekFilter = Number.isFinite(Number(week)) && Number(week) > 0;
+    const query = hasWeekFilter
+      ? `
+      SELECT id, ts, league_key, week, source, payload_hash, payload_json
+      FROM snapshots
+      WHERE ts >= ? AND week = ?
+      ORDER BY ts DESC
+      LIMIT ?
+    `
+      : `
       SELECT id, ts, league_key, week, source, payload_hash, payload_json
       FROM snapshots
       WHERE ts >= ?
       ORDER BY ts DESC
       LIMIT ?
-    `);
+    `;
 
-    return stmt.all(cutoff, safeLimit).map((row) => {
+    const stmt = this.db.prepare(query);
+    const rows = hasWeekFilter
+      ? stmt.all(cutoff, Number(week), safeLimit)
+      : stmt.all(cutoff, safeLimit);
+
+    return rows.map((row) => {
       const payload = safeJson(row.payload_json, null);
       return {
         id: row.id,
@@ -154,6 +168,40 @@ class HistoryStore {
         payload
       };
     });
+  }
+
+  snapshotById(id) {
+    if (!this.isReady()) {
+      return null;
+    }
+
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      return null;
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT id, ts, league_key, week, source, payload_hash, payload_json
+      FROM snapshots
+      WHERE id = ?
+      LIMIT 1
+    `);
+
+    const row = stmt.get(numericId);
+    if (!row) {
+      return null;
+    }
+
+    const payload = safeJson(row.payload_json, null);
+    return {
+      id: row.id,
+      ts: row.ts,
+      leagueKey: row.league_key,
+      week: row.week,
+      source: row.source,
+      hash: row.payload_hash,
+      payload
+    };
   }
 
   recentScoreEvents({ hours = 24, limit = 120 } = {}) {

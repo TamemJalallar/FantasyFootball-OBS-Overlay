@@ -34,6 +34,9 @@
           <label>Admin API Key
             <input id="adminApiKeyInput" type="password" autocomplete="off" placeholder="x-admin-key" />
           </label>
+          <label>Overlay Read Key
+            <input id="overlayApiKeyInput" type="password" autocomplete="off" placeholder="Optional browser-source key" />
+          </label>
           <label>Reduced Animation Mode
             <select id="reducedAnimations">
               <option value="false">Normal Motion</option>
@@ -66,6 +69,23 @@
             <button id="profileSaveBtn" class="btn secondary">Save Current As Profile</button>
             <button id="profileSwitchBtn" class="btn ghost">Switch To Selected</button>
             <button id="profileDeleteBtn" class="btn ghost">Delete Selected</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Quick Start Wizard</h2>
+          <p class="subtle">Fast onboarding flow for first-time setup and OBS handoff.</p>
+          <ol class="wizard-list">
+            <li>Enter Yahoo app credentials and league id in this page.</li>
+            <li>Click <strong>Save Settings</strong> then <strong>Start Yahoo OAuth</strong>.</li>
+            <li>Run <strong>Test API Connection</strong> to confirm live payload.</li>
+            <li>Tune overlay style and copy the Browser Source URL below.</li>
+            <li>Add scene preset links in OBS and pin game-of-week if desired.</li>
+          </ol>
+          <div class="row">
+            <a class="btn ghost" href="/overlay/centered-card" target="_blank" rel="noreferrer">Preview Centered Card</a>
+            <a class="btn ghost" href="/overlay/lower-third" target="_blank" rel="noreferrer">Preview Lower Third</a>
+            <a class="btn ghost" href="/overlay/sidebar-widget" target="_blank" rel="noreferrer">Preview Sidebar</a>
           </div>
         </section>
 
@@ -109,6 +129,15 @@
             <input id="leagueId" type="text" autocomplete="off" />
           </label>
 
+          <label>Data Provider
+            <select id="providerSelect">
+              <option value="yahoo">Yahoo Fantasy</option>
+              <option value="mock">Mock Data</option>
+              <option value="espn">ESPN (placeholder)</option>
+              <option value="sleeper">Sleeper (placeholder)</option>
+            </select>
+          </label>
+
           <label>Game Key (preferred)
             <input id="gameKey" type="text" autocomplete="off" placeholder="Example: 449" />
           </label>
@@ -116,6 +145,51 @@
           <label>Season (optional fallback)
             <input id="season" type="number" min="2010" max="2100" />
           </label>
+
+          <div class="row split">
+            <label>ESPN League ID (optional)
+              <input id="espnLeagueId" type="text" autocomplete="off" placeholder="1234567" />
+            </label>
+            <label>ESPN Season
+              <input id="espnSeason" type="number" min="2010" max="2100" />
+            </label>
+            <label>ESPN Week Mode
+              <select id="espnWeekMode">
+                <option value="current">Current Week</option>
+                <option value="custom">Custom Week</option>
+              </select>
+            </label>
+            <label>ESPN Custom Week
+              <input id="espnWeekNumber" type="number" min="1" max="25" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label>ESPN SWID (for private leagues)
+              <input id="espnSwid" type="password" autocomplete="off" placeholder="{...}" />
+            </label>
+            <label>ESPN S2 Cookie (for private leagues)
+              <input id="espnS2" type="password" autocomplete="off" placeholder="Leave as ******** to keep current" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label>Sleeper League ID (optional)
+              <input id="sleeperLeagueId" type="text" autocomplete="off" placeholder="1111111111111111111" />
+            </label>
+            <label>Sleeper Season
+              <input id="sleeperSeason" type="number" min="2010" max="2100" />
+            </label>
+            <label>Sleeper Week Mode
+              <select id="sleeperWeekMode">
+                <option value="current">Current Week</option>
+                <option value="custom">Custom Week</option>
+              </select>
+            </label>
+            <label>Sleeper Custom Week
+              <input id="sleeperWeekNumber" type="number" min="1" max="25" />
+            </label>
+          </div>
 
           <div class="row split">
             <label>Week Source
@@ -217,11 +291,29 @@
             <label class="checkbox">Mock Mode
               <input id="mockMode" type="checkbox" />
             </label>
+            <label>Mock Seed (deterministic previews)
+              <input id="mockSeed" type="text" placeholder="league-demo-seed" />
+            </label>
             <label class="checkbox">Safe Mode Fallback
               <input id="safeModeEnabled" type="checkbox" />
             </label>
             <label class="checkbox">Safe Mode -> Mock
               <input id="safeModeFallbackToMock" type="checkbox" />
+            </label>
+            <label class="checkbox">Safe Startup Fallback
+              <input id="safeModeStartupForceFallback" type="checkbox" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label class="checkbox">Rate Budget Guard
+              <input id="rateBudgetEnabled" type="checkbox" />
+            </label>
+            <label>Rate Budget / Hour
+              <input id="rateBudgetPerHour" type="number" min="100" max="100000" step="50" />
+            </label>
+            <label>Warn Threshold (0-1)
+              <input id="rateBudgetWarnThreshold" type="number" min="0.1" max="0.99" step="0.01" />
             </label>
           </div>
 
@@ -293,6 +385,15 @@
             <input id="autoRedzoneLockMs" type="number" min="5000" max="120000" step="1000" />
           </label>
 
+          <div class="row split">
+            <label>Auto-redzone Focus Limit
+              <input id="autoRedzoneFocusLimit" type="number" min="1" max="8" step="1" />
+            </label>
+            <label>Auto-redzone Max Score Diff
+              <input id="autoRedzoneMaxScoreDiff" type="number" min="1" max="60" step="1" />
+            </label>
+          </div>
+
           <label>Story Card Interval (after N matchup cards)
             <input id="storyCardsInterval" type="number" min="1" max="6" step="1" />
           </label>
@@ -311,8 +412,23 @@
 
           <div class="row">
             <button id="nextBtn" class="btn secondary">Force Next Matchup</button>
+            <button id="pauseRotationBtn" class="btn ghost">Pause Rotation</button>
+            <button id="resumeRotationBtn" class="btn ghost">Resume Rotation</button>
+            <button id="storyNowBtn" class="btn ghost">Trigger Story Card</button>
             <button id="themePackApplyBtn" class="btn ghost">Apply Theme Pack</button>
             <span class="hint">Keyboard on overlay: <code>N</code> or <code>→</code></span>
+          </div>
+
+          <div class="row split">
+            <label>Pinned Matchup ID
+              <input id="pinnedMatchupId" type="text" placeholder="Leave empty to clear pin" />
+            </label>
+            <label>&nbsp;
+              <button id="pinMatchupBtn" class="btn ghost" type="button">Pin Matchup</button>
+            </label>
+            <label>&nbsp;
+              <button id="clearPinBtn" class="btn ghost" type="button">Clear Pin</button>
+            </label>
           </div>
         </section>
 
@@ -353,6 +469,58 @@
         </section>
 
         <section class="panel">
+          <h2>Branding & Integrations</h2>
+          <p class="subtle">League title/watermark styling plus Discord/Slack event hooks.</p>
+
+          <div class="toggle-grid">
+            <label class="checkbox"><input id="brandingEnabled" type="checkbox" /> Branding overlay</label>
+            <label class="checkbox"><input id="brandingWatermarkEnabled" type="checkbox" /> Watermark enabled</label>
+            <label class="checkbox"><input id="integrationsEnabled" type="checkbox" /> Discord/Slack webhooks</label>
+            <label class="checkbox"><input id="sendTouchdowns" type="checkbox" /> Send touchdowns</label>
+            <label class="checkbox"><input id="sendLeadChanges" type="checkbox" /> Send lead changes</label>
+            <label class="checkbox"><input id="sendUpsets" type="checkbox" /> Send upset alerts</label>
+            <label class="checkbox"><input id="sendFinals" type="checkbox" /> Send finals</label>
+          </div>
+
+          <label>League Title
+            <input id="leagueTitleInput" type="text" placeholder="Fantasy Football Live" />
+          </label>
+          <label>Watermark Text
+            <input id="watermarkTextInput" type="text" placeholder="Yahoo Fantasy Overlay" />
+          </label>
+          <label>Watermark Logo URL
+            <input id="watermarkLogoUrlInput" type="text" placeholder="https://..." />
+          </label>
+
+          <div class="row split">
+            <label>Display Font
+              <select id="fontDisplaySelect">
+                <option value="Rajdhani">Rajdhani</option>
+                <option value="Oxanium">Oxanium</option>
+                <option value="Orbitron">Orbitron</option>
+                <option value="Teko">Teko</option>
+                <option value="Saira Condensed">Saira Condensed</option>
+              </select>
+            </label>
+            <label>Body Font
+              <select id="fontBodySelect">
+                <option value="Rajdhani">Rajdhani</option>
+                <option value="Oxanium">Oxanium</option>
+                <option value="Barlow">Barlow</option>
+                <option value="Saira Condensed">Saira Condensed</option>
+              </select>
+            </label>
+          </div>
+
+          <label>Discord Webhook URL
+            <input id="discordWebhookUrl" type="text" placeholder="https://discord.com/api/webhooks/..." />
+          </label>
+          <label>Slack Webhook URL
+            <input id="slackWebhookUrl" type="text" placeholder="https://hooks.slack.com/services/..." />
+          </label>
+        </section>
+
+        <section class="panel">
           <h2>Audio Queue</h2>
           <p class="subtle">Priority queue for touchdown/lead/upset/final sound events.</p>
 
@@ -371,6 +539,21 @@
             </label>
             <label>Max Queue Size
               <input id="audioMaxQueueSize" type="number" min="5" max="500" step="1" />
+            </label>
+          </div>
+
+          <div class="row split">
+            <label>TD Template
+              <input id="audioTemplateTouchdown" type="text" placeholder="default-td" />
+            </label>
+            <label>Lead Change Template
+              <input id="audioTemplateLeadChange" type="text" placeholder="default-lead" />
+            </label>
+            <label>Upset Template
+              <input id="audioTemplateUpset" type="text" placeholder="default-upset" />
+            </label>
+            <label>Final Template
+              <input id="audioTemplateFinal" type="text" placeholder="default-final" />
             </label>
           </div>
         </section>
@@ -439,6 +622,29 @@
               <p class="health-label">Next TD Scan</p>
               <p class="health-value" id="healthNextTdPoll">--</p>
             </article>
+            <article class="health-card">
+              <p class="health-label">Provider</p>
+              <p class="health-value" id="healthProvider">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Rate Budget</p>
+              <p class="health-value" id="healthRateBudget">--</p>
+            </article>
+            <article class="health-card">
+              <p class="health-label">Circuit State</p>
+              <p class="health-value" id="healthCircuitState">--</p>
+            </article>
+          </div>
+          <div class="row split">
+            <label>History Week Filter
+              <input id="historyWeekFilter" type="number" min="1" max="18" step="1" placeholder="blank = all weeks" />
+            </label>
+            <label>Replay Snapshot ID
+              <input id="replaySnapshotId" type="number" min="1" step="1" placeholder="Snapshot row id" />
+            </label>
+            <label>&nbsp;
+              <button id="replaySnapshotBtn" class="btn ghost" type="button">Replay Snapshot</button>
+            </label>
           </div>
           <div class="row">
             <button id="refreshDiagnosticsBtn" class="btn ghost">Refresh Diagnostics</button>
@@ -457,7 +663,7 @@
           </label>
 
           <div class="row">
-            <a class="btn ghost" href="/overlay" target="_blank" rel="noreferrer">Open Overlay Preview</a>
+            <a id="openOverlayPreviewLink" class="btn ghost" href="/overlay" target="_blank" rel="noreferrer">Open Overlay Preview</a>
             <button id="copyOverlayBtn" class="btn ghost">Copy URL</button>
           </div>
 

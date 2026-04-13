@@ -10,7 +10,23 @@ function envBool(value) {
   return String(value).toLowerCase() === 'true';
 }
 
+function normalizeWeekValue(raw, { min = 1, max = 25, fallback = 'current' } = {}) {
+  if (raw === 'current') {
+    return 'current';
+  }
+
+  const numeric = Number(raw);
+  if (!Number.isInteger(numeric) || numeric < min || numeric > max) {
+    return fallback;
+  }
+
+  return numeric;
+}
+
 function applyValidation(settings) {
+  const provider = String(settings.data.provider || 'yahoo').trim().toLowerCase();
+  settings.data.provider = ['yahoo', 'mock', 'espn', 'sleeper'].includes(provider) ? provider : 'yahoo';
+
   settings.data.refreshIntervalMs = clampNumber(settings.data.refreshIntervalMs, 5000, 900000, 10000);
   settings.data.scoreboardPollMs = clampNumber(settings.data.scoreboardPollMs, 5000, 900000, settings.data.refreshIntervalMs || 10000);
   settings.data.tdScanIntervalMs = clampNumber(settings.data.tdScanIntervalMs, 5000, 900000, settings.data.refreshIntervalMs || 10000);
@@ -47,6 +63,13 @@ function applyValidation(settings) {
   settings.data.safeMode = settings.data.safeMode || {};
   settings.data.safeMode.enabled = Boolean(settings.data.safeMode.enabled);
   settings.data.safeMode.fallbackToMock = Boolean(settings.data.safeMode.fallbackToMock);
+  settings.data.safeMode.startupForceFallbackIfAuthDown = Boolean(settings.data.safeMode.startupForceFallbackIfAuthDown);
+
+  settings.data.rateLimitBudget = settings.data.rateLimitBudget || {};
+  settings.data.rateLimitBudget.enabled = Boolean(settings.data.rateLimitBudget.enabled);
+  settings.data.rateLimitBudget.perHour = clampNumber(settings.data.rateLimitBudget.perHour, 100, 100000, 1800);
+  settings.data.rateLimitBudget.warnThresholdPct = clampNumber(settings.data.rateLimitBudget.warnThresholdPct, 0.1, 0.99, 0.8);
+  settings.data.mockSeed = String(settings.data.mockSeed || '').trim();
 
   settings.data.circuitBreaker = settings.data.circuitBreaker || {};
   settings.data.circuitBreaker.enabled = Boolean(settings.data.circuitBreaker.enabled);
@@ -67,14 +90,39 @@ function applyValidation(settings) {
   settings.overlay.autoRedzone = settings.overlay.autoRedzone || {};
   settings.overlay.autoRedzone.enabled = Boolean(settings.overlay.autoRedzone.enabled);
   settings.overlay.autoRedzone.lockMs = clampNumber(settings.overlay.autoRedzone.lockMs, 5000, 120000, 25000);
+  settings.overlay.autoRedzone.focusLimit = clampNumber(settings.overlay.autoRedzone.focusLimit, 1, 8, 3);
+  settings.overlay.autoRedzone.maxScoreDiff = clampNumber(settings.overlay.autoRedzone.maxScoreDiff, 1, 60, 12);
   settings.overlay.storyCards = settings.overlay.storyCards || {};
   settings.overlay.storyCards.enabled = Boolean(settings.overlay.storyCards.enabled);
   settings.overlay.storyCards.interval = clampNumber(settings.overlay.storyCards.interval, 1, 6, 2);
+  settings.overlay.branding = settings.overlay.branding || {};
+  settings.overlay.branding.enabled = Boolean(settings.overlay.branding.enabled);
+  settings.overlay.branding.leagueTitle = String(settings.overlay.branding.leagueTitle || 'Fantasy Football Live');
+  settings.overlay.branding.watermarkEnabled = Boolean(settings.overlay.branding.watermarkEnabled);
+  settings.overlay.branding.watermarkText = String(settings.overlay.branding.watermarkText || 'Yahoo Fantasy Overlay');
+  settings.overlay.branding.watermarkLogoUrl = String(settings.overlay.branding.watermarkLogoUrl || '');
+  settings.overlay.branding.fontDisplay = String(settings.overlay.branding.fontDisplay || 'Rajdhani');
+  settings.overlay.branding.fontBody = String(settings.overlay.branding.fontBody || 'Rajdhani');
   settings.security.reducedAnimations = Boolean(settings.security.reducedAnimations);
   settings.security.useOsKeychain = Boolean(settings.security.useOsKeychain);
+  settings.security.overlayApiKey = String(settings.security.overlayApiKey || '').trim();
   settings.audio.enabled = Boolean(settings.audio.enabled);
   settings.audio.minDispatchIntervalMs = clampNumber(settings.audio.minDispatchIntervalMs, 250, 30000, 1200);
   settings.audio.maxQueueSize = clampNumber(settings.audio.maxQueueSize, 5, 500, 50);
+  settings.audio.templates = settings.audio.templates || {};
+  settings.audio.templates.touchdown = String(settings.audio.templates.touchdown || 'default-td');
+  settings.audio.templates.lead_change = String(settings.audio.templates.lead_change || 'default-lead');
+  settings.audio.templates.upset = String(settings.audio.templates.upset || 'default-upset');
+  settings.audio.templates.final = String(settings.audio.templates.final || 'default-final');
+
+  settings.integrations = settings.integrations || {};
+  settings.integrations.enabled = Boolean(settings.integrations.enabled);
+  settings.integrations.discordWebhookUrl = String(settings.integrations.discordWebhookUrl || '').trim();
+  settings.integrations.slackWebhookUrl = String(settings.integrations.slackWebhookUrl || '').trim();
+  settings.integrations.sendTouchdowns = Boolean(settings.integrations.sendTouchdowns);
+  settings.integrations.sendLeadChanges = Boolean(settings.integrations.sendLeadChanges);
+  settings.integrations.sendUpsets = Boolean(settings.integrations.sendUpsets);
+  settings.integrations.sendFinals = Boolean(settings.integrations.sendFinals);
 
   settings.obs.enabled = Boolean(settings.obs.enabled);
   settings.obs.sceneCooldownMs = clampNumber(settings.obs.sceneCooldownMs, 0, 300000, 7000);
@@ -85,6 +133,18 @@ function applyValidation(settings) {
   settings.obs.scenes.upset = String(settings.obs.scenes.upset || '');
   settings.obs.scenes.gameOfWeek = String(settings.obs.scenes.gameOfWeek || '');
   settings.obs.scenes.default = String(settings.obs.scenes.default || '');
+
+  settings.espn = settings.espn || {};
+  settings.espn.leagueId = String(settings.espn.leagueId || '').trim();
+  settings.espn.season = clampNumber(settings.espn.season, 2010, 2100, settings.league.season || new Date().getFullYear());
+  settings.espn.week = normalizeWeekValue(settings.espn.week, { min: 1, max: 25, fallback: 'current' });
+  settings.espn.swid = String(settings.espn.swid || '').trim();
+  settings.espn.espnS2 = String(settings.espn.espnS2 || '').trim();
+
+  settings.sleeper = settings.sleeper || {};
+  settings.sleeper.leagueId = String(settings.sleeper.leagueId || '').trim();
+  settings.sleeper.season = clampNumber(settings.sleeper.season, 2010, 2100, settings.league.season || new Date().getFullYear());
+  settings.sleeper.week = normalizeWeekValue(settings.sleeper.week, { min: 1, max: 25, fallback: 'current' });
 
   settings.overlay.mode = settings.overlay.mode === 'ticker' ? 'ticker' : 'carousel';
   settings.overlay.layout = settings.overlay.layout === 'compact' ? 'compact' : 'full';
@@ -116,8 +176,44 @@ async function applyEnvDefaults(settings) {
     settings.yahoo.clientSecret = secretFromStore;
   }
 
+  const espnSwidFromStore = await getSecret('espnSwid');
+  if (espnSwidFromStore && !settings.espn.swid) {
+    settings.espn.swid = espnSwidFromStore;
+  }
+
+  const espnS2FromStore = await getSecret('espnS2');
+  if (espnS2FromStore && !settings.espn.espnS2) {
+    settings.espn.espnS2 = espnS2FromStore;
+  }
+
   if (process.env.YAHOO_CLIENT_SECRET) {
     settings.yahoo.clientSecret = process.env.YAHOO_CLIENT_SECRET;
+  }
+
+  if (process.env.ESPN_LEAGUE_ID) {
+    settings.espn.leagueId = process.env.ESPN_LEAGUE_ID;
+  }
+  if (process.env.ESPN_SEASON) {
+    settings.espn.season = Number(process.env.ESPN_SEASON);
+  }
+  if (process.env.ESPN_WEEK) {
+    settings.espn.week = process.env.ESPN_WEEK === 'current' ? 'current' : Number(process.env.ESPN_WEEK);
+  }
+  if (process.env.ESPN_SWID) {
+    settings.espn.swid = process.env.ESPN_SWID;
+  }
+  if (process.env.ESPN_S2) {
+    settings.espn.espnS2 = process.env.ESPN_S2;
+  }
+
+  if (process.env.SLEEPER_LEAGUE_ID) {
+    settings.sleeper.leagueId = process.env.SLEEPER_LEAGUE_ID;
+  }
+  if (process.env.SLEEPER_SEASON) {
+    settings.sleeper.season = Number(process.env.SLEEPER_SEASON);
+  }
+  if (process.env.SLEEPER_WEEK) {
+    settings.sleeper.week = process.env.SLEEPER_WEEK === 'current' ? 'current' : Number(process.env.SLEEPER_WEEK);
   }
 
   const appBaseUrl = process.env.APP_BASE_URL || `http://localhost:${process.env.PORT || 3030}`;
@@ -129,6 +225,10 @@ async function applyEnvDefaults(settings) {
 
   if (process.env.ADMIN_API_KEY && !settings.security.adminApiKey) {
     settings.security.adminApiKey = process.env.ADMIN_API_KEY;
+  }
+
+  if (process.env.OVERLAY_API_KEY && !settings.security.overlayApiKey) {
+    settings.security.overlayApiKey = process.env.OVERLAY_API_KEY;
   }
 
   if (process.env.USE_OS_KEYCHAIN !== undefined) {
@@ -172,9 +272,23 @@ async function saveSettings(settings) {
     await setSecret('yahooClientSecret', validated.yahoo.clientSecret);
   }
 
+  if (validated.espn.swid && validated.espn.swid !== '********') {
+    await setSecret('espnSwid', validated.espn.swid);
+  }
+
+  if (validated.espn.espnS2 && validated.espn.espnS2 !== '********') {
+    await setSecret('espnS2', validated.espn.espnS2);
+  }
+
   const persistable = deepClone(validated);
   if (persistable.yahoo.clientSecret) {
     persistable.yahoo.clientSecret = '';
+  }
+  if (persistable.espn?.swid) {
+    persistable.espn.swid = '';
+  }
+  if (persistable.espn?.espnS2) {
+    persistable.espn.espnS2 = '';
   }
 
   await fs.writeFile(SETTINGS_PATH, `${JSON.stringify(persistable, null, 2)}\n`, 'utf8');
@@ -194,12 +308,30 @@ function redactSecrets(settings) {
     cloned.yahoo.clientSecret = '********';
   }
 
+  if (cloned.espn?.swid) {
+    cloned.espn.swid = '********';
+  }
+  if (cloned.espn?.espnS2) {
+    cloned.espn.espnS2 = '********';
+  }
+
   if (cloned.security.adminApiKey) {
     cloned.security.adminApiKey = '********';
   }
 
+  if (cloned.security.overlayApiKey) {
+    cloned.security.overlayApiKey = '********';
+  }
+
   if (cloned.obs?.password) {
     cloned.obs.password = '********';
+  }
+
+  if (cloned.integrations?.discordWebhookUrl) {
+    cloned.integrations.discordWebhookUrl = '********';
+  }
+  if (cloned.integrations?.slackWebhookUrl) {
+    cloned.integrations.slackWebhookUrl = '********';
   }
 
   return cloned;
@@ -214,11 +346,17 @@ async function getAdminApiKey() {
   return settings.security.adminApiKey || '';
 }
 
+async function getOverlayApiKey() {
+  const settings = await loadSettings();
+  return settings.security.overlayApiKey || '';
+}
+
 module.exports = {
   SETTINGS_PATH,
   loadSettings,
   saveSettings,
   updateSettings,
   redactSecrets,
-  getAdminApiKey
+  getAdminApiKey,
+  getOverlayApiKey
 };

@@ -1,9 +1,15 @@
 const crypto = require('node:crypto');
-const { normalizeYahooMatchups } = require('./normalizer');
+const {
+  normalizeYahooMatchups,
+  normalizeEspnMatchups,
+  normalizeSleeperMatchups
+} = require('./normalizer');
 const { createMockMatchups } = require('./mockData');
 const { readCache, writeCache } = require('./cacheStore');
 const { loadTdState, saveTdState } = require('./tdStateStore');
 const { toArray, toNumber, safeString } = require('./utils');
+const { resolveProvider, fetchByProvider } = require('./providerRegistry');
+const { dispatchIntegrations } = require('./integrations');
 
 const BENCH_POSITIONS = new Set(['BN', 'IR', 'IR+', 'NA']);
 const FALLBACK_TD_STATS = {
@@ -428,6 +434,8 @@ class DataService {
     logger,
     getSettings,
     yahooApi,
+    espnApi = null,
+    sleeperApi = null,
     authService,
     sseHub,
     metrics = null,
@@ -438,6 +446,8 @@ class DataService {
     this.logger = logger;
     this.getSettings = getSettings;
     this.yahooApi = yahooApi;
+    this.espnApi = espnApi;
+    this.sleeperApi = sleeperApi;
     this.authService = authService;
     this.sseHub = sseHub;
     this.metrics = metrics;
@@ -482,6 +492,13 @@ class DataService {
     this.scheduleWindowState = null;
     this.nextScoreboardDelayMs = null;
     this.nextTdDelayMs = null;
+    this.lastSettings = null;
+    this.lastProvider = 'unknown';
+    this.controlState = {
+      rotationPaused: false,
+      pinnedMatchupId: '',
+      forceStoryAt: null
+    };
   }
 
   async init() {
@@ -566,6 +583,7 @@ class DataService {
       tdFailureCount: this.tdFailureCount,
       hasData: Boolean(this.currentPayload),
       mode: this.currentPayload?.league?.source || 'unknown',
+      provider: this.lastProvider,
       lastScoreboardPollAt: this.lastScoreboardPollAt,
       lastTdScanAt: this.lastTdScanAt,
       degradedMode: this.getDegradedMode(),
@@ -573,6 +591,7 @@ class DataService {
       circuitReason: this.circuit.reason,
       circuitTripCount: this.circuit.tripCount,
       skippedPolls: this.circuit.skippedPolls,
+      controlState: this.controlState,
       scheduleWindow: this.scheduleWindowState,
       nextScoreboardDelayMs: this.nextScoreboardDelayMs,
       nextTdDelayMs: this.nextTdDelayMs
@@ -588,9 +607,11 @@ class DataService {
 
   getDiagnostics({ hours = 24 } = {}) {
     const h = Math.max(1, Math.min(168, Number(hours) || 24));
+    const yahooBudget = this.yahooApi?.getBudgetTelemetry ? this.yahooApi.getBudgetTelemetry({ data: { rateLimitBudget: (this.lastSettings?.data?.rateLimitBudget || {}) } }) : null;
     return {
       status: this.buildStatus(),
       metrics: this.metrics?.snapshot() || {},
+      yahooBudget,
       pollRecords: this.pollRecords.slice(0, 120),
       recentLeadChanges: this.recentLeadChanges.slice(0, 40),
       recentUpsetEvents: this.recentUpsetEvents.slice(0, 40),
@@ -641,15 +662,118 @@ class DataService {
     });
   }
 
-  async fetchPayload(settings) {
-    if (settings.data.mockMode) {
-      return createMockMatchups({
-        week: settings.league.week === 'current' ? 1 : Number(settings.league.week || 1),
-        pinnedMatchupId: settings.overlay.gameOfWeekMatchupId
-      });
+  getProviderWeek(providerSettings = {}, fallbackWeek = 'current') {
+    const raw = providerSettings.week ?? fallbackWeek ?? 'current';
+    if (raw === 'current') {
+      return 'current';
     }
 
-    return this.fetchLivePayload(settings);
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric) || numeric < 1) {
+      return 'current';
+    }
+
+    return numeric;
+  }
+
+  async fetchEspnPayload(settings) {
+    if (!this.espnApi) {
+      throw new Error('ESPN provider is unavailable: espnApi client is not initialized.');
+    }
+
+    const provider = settings.espn || {};
+    const leagueId = String(provider.leagueId || settings?.league?.leagueId || '').trim();
+    if (!leagueId) {
+      throw new Error('ESPN league_id is missing. Set espn.leagueId (or league.leagueId) in admin.');
+    }
+
+    const season = Number(provider.season || settings?.league?.season || new Date().getFullYear());
+    const week = this.getProviderWeek(provider, settings?.league?.week);
+
+    const leaguePayload = await this.espnApi.fetchLeague({
+      leagueId,
+      season,
+      views: ['mMatchup', 'mTeam', 'mSettings', 'mStatus'],
+      swid: provider.swid || '',
+      espnS2: provider.espnS2 || ''
+    });
+
+    return normalizeEspnMatchups({
+      leaguePayload,
+      settings: {
+        ...settings,
+        espn: {
+          ...provider,
+          leagueId,
+          season,
+          week
+        }
+      }
+    });
+  }
+
+  async fetchSleeperPayload(settings) {
+    if (!this.sleeperApi) {
+      throw new Error('Sleeper provider is unavailable: sleeperApi client is not initialized.');
+    }
+
+    const provider = settings.sleeper || {};
+    const leagueId = String(provider.leagueId || settings?.league?.leagueId || '').trim();
+    if (!leagueId) {
+      throw new Error('Sleeper league_id is missing. Set sleeper.leagueId (or league.leagueId) in admin.');
+    }
+
+    const season = Number(provider.season || settings?.league?.season || new Date().getFullYear());
+    const requestedWeek = this.getProviderWeek(provider, settings?.league?.week);
+
+    const [statePayload, leaguePayload, usersPayload, rostersPayload] = await Promise.all([
+      this.sleeperApi.fetchState(),
+      this.sleeperApi.fetchLeague(leagueId),
+      this.sleeperApi.fetchUsers(leagueId),
+      this.sleeperApi.fetchRosters(leagueId)
+    ]);
+
+    const resolvedWeek = requestedWeek === 'current'
+      ? Number(statePayload?.week || 1)
+      : Number(requestedWeek);
+
+    const matchupsPayload = await this.sleeperApi.fetchMatchups(leagueId, resolvedWeek);
+
+    return normalizeSleeperMatchups({
+      leaguePayload,
+      usersPayload,
+      rostersPayload,
+      matchupsPayload,
+      statePayload,
+      settings: {
+        ...settings,
+        sleeper: {
+          ...provider,
+          leagueId,
+          season,
+          week: resolvedWeek
+        }
+      }
+    });
+  }
+
+  async fetchPayload(settings) {
+    const provider = resolveProvider(settings);
+    this.lastProvider = provider;
+
+    return fetchByProvider({
+      provider,
+      fetchers: {
+        mock: async () => createMockMatchups({
+          week: settings.league.week === 'current' ? 1 : Number(settings.league.week || 1),
+          pinnedMatchupId: settings.overlay.gameOfWeekMatchupId,
+          seedOverride: settings.data.mockSeed || process.env.MOCK_SEED || null
+        }),
+        yahoo: async () => this.fetchLivePayload(settings),
+        espn: async () => this.fetchEspnPayload(settings),
+        sleeper: async () => this.fetchSleeperPayload(settings)
+      }
+    });
   }
 
   async resolveTouchdownStatConfig(leagueKey) {
@@ -871,27 +995,54 @@ class DataService {
     };
   }
 
-  async triggerScoreHook(scoreChanges, tdEvents, hookUrl) {
-    if (!hookUrl || (!scoreChanges.length && !tdEvents.length)) {
+  async dispatchExternalHooks({
+    settings,
+    payload,
+    scoreChanges = [],
+    tdEvents = [],
+    leadChanges = [],
+    upsetEvents = [],
+    finalEvents = [],
+    playerScoreChanges = []
+  }) {
+    const hookUrl = settings?.overlay?.soundHookUrl;
+    if (!hookUrl && !settings?.integrations?.enabled) {
       return;
     }
 
-    try {
-      await fetch(hookUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          type: 'overlay_update',
-          scoreChanges,
-          tdEvents,
-          ts: new Date().toISOString()
-        })
-      });
-    } catch (error) {
-      this.logger.warn('Score hook failed', { error: error.message });
+    if (hookUrl && (scoreChanges.length || tdEvents.length || leadChanges.length || upsetEvents.length || finalEvents.length)) {
+      try {
+        await fetch(hookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            type: 'overlay_update',
+            scoreChanges,
+            tdEvents,
+            leadChanges,
+            upsetEvents,
+            finalEvents,
+            playerScoreChanges,
+            ts: new Date().toISOString()
+          })
+        });
+      } catch (error) {
+        this.logger.warn('Score hook failed', { error: error.message });
+      }
     }
+
+    await dispatchIntegrations({
+      logger: this.logger,
+      settings,
+      payload,
+      scoreChanges,
+      tdEvents,
+      leadChanges,
+      upsetEvents,
+      finalEvents
+    });
   }
 
   queueAutomationEvents({ scoreChanges, tdEvents, leadChanges, upsetEvents, finalEvents, payload }) {
@@ -1057,6 +1208,7 @@ class DataService {
 
   async pollScoreboard({ forceBroadcast = false } = {}) {
     const settings = await this.getSettings();
+    this.lastSettings = settings;
     const startedAt = Date.now();
 
     if (this.isCircuitOpen()) {
@@ -1093,7 +1245,16 @@ class DataService {
       this.closeCircuit();
 
       await writeCache(payload);
-      await this.triggerScoreHook(scoreChanges, [], settings.overlay.soundHookUrl);
+      await this.dispatchExternalHooks({
+        settings,
+        payload,
+        scoreChanges,
+        tdEvents: [],
+        leadChanges,
+        upsetEvents,
+        finalEvents,
+        playerScoreChanges: []
+      });
 
       if (settings.data?.history?.enabled) {
         this.historyStore?.saveSnapshot({ payload, hash: nextHash, scoreChanges, leadChanges });
@@ -1133,6 +1294,11 @@ class DataService {
       this.metrics?.set('scoreboard_failure_count', this.scoreFailureCount);
       this.metrics?.set('overlay_has_data', this.currentPayload ? 1 : 0);
       this.metrics?.set('scoreboard_last_duration_ms', Date.now() - startedAt);
+      const budget = this.yahooApi?.getBudgetTelemetry ? this.yahooApi.getBudgetTelemetry(settings) : null;
+      if (budget) {
+        this.metrics?.set('yahoo_rate_budget_usage_pct', budget.usagePct * 100);
+        this.metrics?.set('yahoo_rate_budget_warning', budget.warning ? 1 : 0);
+      }
       this.recordPoll({
         kind: 'scoreboard',
         success: true,
@@ -1188,6 +1354,7 @@ class DataService {
         if (cached) {
           this.currentPayload = cached;
           this.currentHash = payloadHash(cached);
+          this.lastProvider = 'cache';
           this.logger.warn('Fallback to cached payload after scoreboard failure');
           this.sseHub.broadcast('update', {
             payload: this.currentPayload,
@@ -1205,10 +1372,12 @@ class DataService {
         if (settings.data?.safeMode?.enabled && settings.data?.safeMode?.fallbackToMock) {
           const fallbackPayload = applyOverlaySettings(createMockMatchups({
             week: settings.league.week === 'current' ? 1 : Number(settings.league.week || 1),
-            pinnedMatchupId: settings.overlay.gameOfWeekMatchupId
+            pinnedMatchupId: settings.overlay.gameOfWeekMatchupId,
+            seedOverride: settings.data.mockSeed || process.env.MOCK_SEED || null
           }), settings);
           this.currentPayload = fallbackPayload;
           this.currentHash = payloadHash(fallbackPayload);
+          this.lastProvider = 'mock-safe';
           this.lastSuccessAt = fallbackPayload.updatedAt || new Date().toISOString();
           this.logger.warn('Safe mode fallback engaged: using mock payload after Yahoo failure');
           this.sseHub.broadcast('update', {
@@ -1228,6 +1397,7 @@ class DataService {
 
   async scanTouchdowns({ forceBroadcast = false } = {}) {
     const settings = await this.getSettings();
+    this.lastSettings = settings;
     const startedAt = Date.now();
 
     try {
@@ -1251,12 +1421,27 @@ class DataService {
       this.metrics?.set('td_failure_count', this.tdFailureCount);
       this.metrics?.set('td_scan_last_duration_ms', Date.now() - startedAt);
 
-      if (!tdEvents.length && !forceBroadcast) {
-        this.recordPoll({ kind: 'td_scan', success: true, durationMs: Date.now() - startedAt, tdEvents: 0 });
+      if (!tdEvents.length && !playerScoreChanges.length && !forceBroadcast) {
+        this.recordPoll({
+          kind: 'td_scan',
+          success: true,
+          durationMs: Date.now() - startedAt,
+          tdEvents: 0,
+          playerScoreChanges: 0
+        });
         return;
       }
 
-      await this.triggerScoreHook([], tdEvents, settings.overlay.soundHookUrl);
+      await this.dispatchExternalHooks({
+        settings,
+        payload: this.currentPayload,
+        scoreChanges: [],
+        tdEvents,
+        leadChanges: [],
+        upsetEvents: [],
+        finalEvents: [],
+        playerScoreChanges
+      });
       this.pushRecent('recentTdEvents', tdEvents, 80);
       this.pushRecent('recentPlayerScoreChanges', playerScoreChanges, 120);
 
@@ -1281,7 +1466,13 @@ class DataService {
       });
 
       this.metrics?.inc('td_events_sent_total', tdEvents.length);
-      this.recordPoll({ kind: 'td_scan', success: true, durationMs: Date.now() - startedAt, tdEvents: tdEvents.length });
+      this.recordPoll({
+        kind: 'td_scan',
+        success: true,
+        durationMs: Date.now() - startedAt,
+        tdEvents: tdEvents.length,
+        playerScoreChanges: playerScoreChanges.length
+      });
     } catch (error) {
       this.tdFailureCount += 1;
       this.lastError = {
@@ -1335,7 +1526,14 @@ class DataService {
     }
 
     this.running = true;
-    await this.pollScoreboard({ forceBroadcast: true });
+    const settings = await this.getSettings();
+    this.lastSettings = settings;
+
+    const startupFallbackApplied = await this.applyStartupSafeModeFallback(settings);
+    if (!startupFallbackApplied) {
+      await this.pollScoreboard({ forceBroadcast: true });
+    }
+
     await this.scanTouchdowns({ forceBroadcast: false });
     await this.scheduleNextScoreboardPoll();
     await this.scheduleNextTdScan();
@@ -1363,34 +1561,178 @@ class DataService {
     await this.scanTouchdowns({ forceBroadcast: true });
   }
 
+  async applyStartupSafeModeFallback(settings) {
+    const safeMode = settings?.data?.safeMode || {};
+    const fallbackEnabled = Boolean(safeMode.enabled && safeMode.startupForceFallbackIfAuthDown);
+    if (!fallbackEnabled) {
+      return false;
+    }
+
+    const provider = resolveProvider(settings);
+    if (provider !== 'yahoo') {
+      return false;
+    }
+
+    let authStatus = null;
+    try {
+      authStatus = await this.authService.getAuthStatus();
+    } catch (error) {
+      this.logger.warn('Unable to resolve Yahoo auth status during startup fallback check', { error: error.message });
+    }
+
+    if (authStatus?.configured && authStatus.authorized) {
+      return false;
+    }
+
+    const reason = authStatus?.configured
+      ? 'safe mode startup fallback: Yahoo OAuth authorization missing'
+      : 'safe mode startup fallback: Yahoo credentials missing';
+
+    const circuitEnabled = Boolean(settings.data?.circuitBreaker?.enabled);
+    if (circuitEnabled) {
+      this.openCircuit({
+        reason: 'startup_auth_unavailable',
+        cooldownMs: Number(settings.data?.circuitBreaker?.cooldownMs || 60000)
+      });
+    }
+
+    if (this.currentPayload) {
+      this.lastProvider = 'cache-safe-startup';
+      this.logger.warn('Using cached payload at startup while Yahoo auth is unavailable');
+      this.sseHub.broadcast('status', this.buildStatus());
+      return true;
+    }
+
+    if (!safeMode.fallbackToMock) {
+      this.lastError = {
+        message: `${reason}; enable safeMode.fallbackToMock to render mock overlay data.`,
+        at: new Date().toISOString(),
+        phase: 'startup'
+      };
+      this.sseHub.broadcast('status', this.buildStatus());
+      return false;
+    }
+
+    const fallbackPayload = applyOverlaySettings(createMockMatchups({
+      week: settings.league.week === 'current' ? 1 : Number(settings.league.week || 1),
+      pinnedMatchupId: settings.overlay.gameOfWeekMatchupId,
+      seedOverride: settings.data.mockSeed || process.env.MOCK_SEED || null
+    }), settings);
+
+    this.currentPayload = fallbackPayload;
+    this.currentHash = payloadHash(fallbackPayload);
+    this.lastProvider = 'mock-safe-startup';
+    this.lastSuccessAt = fallbackPayload.updatedAt || new Date().toISOString();
+    this.lastError = {
+      message: reason,
+      at: new Date().toISOString(),
+      phase: 'startup'
+    };
+
+    await writeCache(fallbackPayload);
+    this.logger.warn('Startup safe mode fallback engaged with mock payload');
+
+    this.sseHub.broadcast('update', {
+      payload: this.currentPayload,
+      scoreChanges: [],
+      playerScoreChanges: [],
+      tdEvents: [],
+      leadChanges: [],
+      upsetEvents: [],
+      finalEvents: [],
+      status: this.buildStatus()
+    });
+
+    return true;
+  }
+
   manualNext() {
     this.sseHub.broadcast('control', { action: 'next' });
   }
 
+  setRotationPaused(paused) {
+    this.controlState.rotationPaused = Boolean(paused);
+    this.sseHub.broadcast('control', {
+      action: 'set_rotation_paused',
+      paused: this.controlState.rotationPaused
+    });
+  }
+
+  pinMatchup(matchupId) {
+    this.controlState.pinnedMatchupId = String(matchupId || '').trim();
+    this.sseHub.broadcast('control', {
+      action: this.controlState.pinnedMatchupId ? 'pin_matchup' : 'clear_pin_matchup',
+      matchupId: this.controlState.pinnedMatchupId
+    });
+  }
+
+  triggerStoryCard() {
+    this.controlState.forceStoryAt = new Date().toISOString();
+    this.sseHub.broadcast('control', {
+      action: 'force_story_card',
+      ts: this.controlState.forceStoryAt
+    });
+  }
+
+  replaySnapshot(snapshot) {
+    if (!snapshot) {
+      return false;
+    }
+
+    this.currentPayload = snapshot;
+    this.currentHash = payloadHash(snapshot);
+    this.lastSuccessAt = new Date().toISOString();
+    this.lastProvider = 'replay';
+
+    this.sseHub.broadcast('update', {
+      payload: this.currentPayload,
+      scoreChanges: [],
+      playerScoreChanges: [],
+      tdEvents: [],
+      leadChanges: [],
+      upsetEvents: [],
+      finalEvents: [],
+      status: this.buildStatus()
+    });
+
+    return true;
+  }
+
   async testConnection() {
     const settings = await this.getSettings();
+    const provider = resolveProvider(settings);
 
-    if (settings.data.mockMode) {
+    if (provider === 'mock') {
       return {
         ok: true,
         mode: 'mock',
-        message: 'Mock mode is enabled. Disable mock mode to test Yahoo API.'
+        message: 'Mock mode is enabled. Disable mock mode or switch provider to test live APIs.'
       };
     }
 
-    const authStatus = await this.authService.getAuthStatus();
-    if (!authStatus.configured) {
-      throw new Error('Yahoo credentials are not configured.');
-    }
-    if (!authStatus.authorized) {
-      throw new Error('Yahoo OAuth is not completed yet.');
-    }
+    let payload = null;
 
-    const payload = await this.fetchLivePayload(settings);
+    if (provider === 'yahoo') {
+      const authStatus = await this.authService.getAuthStatus();
+      if (!authStatus.configured) {
+        throw new Error('Yahoo credentials are not configured.');
+      }
+      if (!authStatus.authorized) {
+        throw new Error('Yahoo OAuth is not completed yet.');
+      }
+
+      payload = await this.fetchLivePayload(settings);
+    } else if (provider === 'espn') {
+      payload = await this.fetchEspnPayload(settings);
+    } else if (provider === 'sleeper') {
+      payload = await this.fetchSleeperPayload(settings);
+    } else {
+      throw new Error(`Unsupported provider '${provider}'`);
+    }
 
     return {
       ok: true,
-      mode: 'yahoo',
+      mode: provider,
       league: payload.league,
       matchupCount: payload.matchups.length,
       updatedAt: payload.updatedAt

@@ -1,0 +1,35 @@
+{
+  "generatedAt": "2026-04-11T10:47:47.783Z",
+  "files": [
+    {
+      "path": "docs/screenshots/admin-config.png",
+      "size": 942440,
+      "sha256": "37b5874ce029879fd3c3271349c5b8ca8e65592b8400273df221bcb6c33fcde9"
+    },
+    {
+      "path": "docs/screenshots/overlay-bottom-ticker.png",
+      "size": 49146,
+      "sha256": "e8de9db542f3d2472a81de00846c71aa77d74c6eda9540ac92fcd8cfe438a808"
+    },
+    {
+      "path": "docs/screenshots/overlay-centered-card.png",
+      "size": 78843,
+      "sha256": "217865dded59a337d8c7320852bfa3b964f32b504970300f98006fbf4ffae545"
+    },
+    {
+      "path": "docs/screenshots/overlay-demo.gif",
+      "size": 779618,
+      "sha256": "a615a6e39d0da82695edbc89fe792d1104cf3ca2494f0ff6510ee8ec08ecb84e"
+    },
+    {
+      "path": "docs/screenshots/overlay-lower-third.png",
+      "size": 80475,
+      "sha256": "18937fe5094639531b9f800bda0041073a824548dc924e198297e3adb94a8436"
+    },
+    {
+      "path": "docs/screenshots/overlay-sidebar-two-up.png",
+      "size": 109011,
+      "sha256": "cb9e837b64f615dbbea6e03726115724f84e96b5557f2cf282e890d15e4111db"
+    }
+  ]
+}
