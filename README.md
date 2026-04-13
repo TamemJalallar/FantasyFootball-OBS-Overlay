@@ -14,6 +14,7 @@ Use it to show rotating weekly matchups, ticker mode, touchdown/lead-change aler
 - [Environment Variables (.env)](#environment-variables-env)
 - [Configuration Precedence](#configuration-precedence)
 - [First-Run Setup (Recommended Path)](#first-run-setup-recommended-path)
+- [New-User Dry Run (Copy/Paste)](#new-user-dry-run-copypaste)
 - [Provider Setup](#provider-setup)
 - [Admin UI Guide (/admin)](#admin-ui-guide-admin)
 - [Setup Center (/setup)](#setup-center-setup)
@@ -207,6 +208,169 @@ Practical tip:
 6. Run `Test API Connection`.
 7. Open `/setup` and copy scene URLs.
 8. Add those URLs in OBS Browser Sources.
+
+## New-User Dry Run (Copy/Paste)
+
+Use this section if you want near-zero ambiguity and a strict validation flow.
+
+### 1) Shared Bootstrap (All Providers)
+
+```bash
+cd "/Users/tamem.jalallar/Library/CloudStorage/OneDrive-Ogilvy/Documents/App-Ideas/OBS/FantasyFootball-Yahoo"
+cp .env.example .env
+npm install
+npm run dev
+```
+
+Expected result:
+1. `http://localhost:3030/admin` loads.
+2. `http://localhost:3030/setup` loads.
+3. `http://localhost:3030/overlay` loads.
+4. `http://localhost:3030/health` returns JSON with `"ok": true`.
+
+### 2) Mock Provider Dry Run (No Auth)
+
+Paste this into `.env`:
+
+```bash
+PORT=3030
+APP_BASE_URL=http://localhost:3030
+MOCK_MODE=true
+ADMIN_API_KEY=
+OVERLAY_API_KEY=
+USE_OS_KEYCHAIN=false
+```
+
+Then:
+1. Restart app (`npm run dev`).
+2. In `/admin`, set Provider to `Mock` and click `Save Settings`.
+3. Click `Test API Connection`.
+4. Open `/overlay/centered-card`.
+
+Expected result:
+1. Test API returns success.
+2. Overlay rotates matchup cards.
+3. `/setup` checklist shows data is loaded.
+
+### 3) Yahoo Dry Run (OAuth)
+
+Paste this into `.env` (replace placeholders):
+
+```bash
+PORT=3030
+APP_BASE_URL=http://localhost:3030
+YAHOO_CLIENT_ID=YOUR_YAHOO_CLIENT_ID
+YAHOO_CLIENT_SECRET=YOUR_YAHOO_CLIENT_SECRET
+YAHOO_REDIRECT_URI=http://localhost:3030/auth/callback
+MOCK_MODE=false
+ADMIN_API_KEY=
+OVERLAY_API_KEY=
+USE_OS_KEYCHAIN=false
+```
+
+Then:
+1. Restart app.
+2. In `/admin`, set Provider to `Yahoo`.
+3. Enter `League ID`, `Game Key` (or `Season`), and `Week`.
+4. Click `Save Settings`.
+5. Click `Start Yahoo OAuth` and complete consent.
+6. Back in `/admin`, click `Test API Connection`.
+7. Open `/setup` and confirm checklist passes.
+8. Open `/overlay/lower-third` and verify live data.
+
+Expected result:
+1. OAuth status shows authorized.
+2. Test API returns success.
+3. Overlay displays real Yahoo matchup values.
+
+Private League Quick Fixes (Yahoo):
+1. Redirect mismatch: in Yahoo developer app and `/admin`, use exactly `http://localhost:3030/auth/callback`.
+2. Wrong account during auth: log out of Yahoo in browser, then run `Start Yahoo OAuth` again.
+3. Stale token state: click `Clear Stored Tokens`, save settings, then restart OAuth.
+4. League visibility issue: verify the authenticated Yahoo account is actually a manager/member of the target `League ID`.
+5. Game key mismatch: use the season’s correct `Game Key` (for example, 2025 vs 2026) and re-test.
+
+### 4) ESPN Dry Run
+
+Paste this into `.env` (replace placeholders):
+
+```bash
+PORT=3030
+APP_BASE_URL=http://localhost:3030
+ESPN_LEAGUE_ID=YOUR_ESPN_LEAGUE_ID
+ESPN_SEASON=2026
+ESPN_WEEK=current
+ESPN_SWID=
+ESPN_S2=
+MOCK_MODE=false
+ADMIN_API_KEY=
+OVERLAY_API_KEY=
+USE_OS_KEYCHAIN=false
+```
+
+Then:
+1. Restart app.
+2. In `/admin`, set Provider to `ESPN`.
+3. Confirm league/season/week values.
+4. For private leagues, add `SWID` and `espn_s2`.
+5. Click `Save Settings`.
+6. Click `Test API Connection`.
+7. Open `/overlay/sidebar-widget`.
+
+Expected result:
+1. Test API returns success.
+2. Overlay renders ESPN-normalized matchup cards.
+
+Private League Quick Fixes (ESPN):
+1. Private league auth: fill both `ESPN SWID` and `ESPN S2` in `/admin`, then save.
+2. Cookie formatting: keep SWID with braces if ESPN gives braces (example `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}`).
+3. Stale browser cookies: re-copy `SWID` and `espn_s2` from a fresh logged-in ESPN web session.
+4. Wrong season/week: confirm `ESPN Season` and `ESPN Week` match active matchup data.
+5. Access mismatch: confirm the ESPN account tied to those cookies has access to the target league.
+
+Tiny Screenshot Callout: Where to find `SWID` and `espn_s2`
+
+![Where to find ESPN SWID and espn_s2](docs/screenshots/espn-swid-s2-callout.svg)
+
+Quick reminder:
+1. Open your ESPN league in browser.
+2. Open DevTools -> Application/Storage -> Cookies -> `https://fantasy.espn.com`.
+3. Copy `SWID` and `espn_s2` values into `/admin`.
+
+### 5) Sleeper Dry Run
+
+Paste this into `.env` (replace placeholders):
+
+```bash
+PORT=3030
+APP_BASE_URL=http://localhost:3030
+SLEEPER_LEAGUE_ID=YOUR_SLEEPER_LEAGUE_ID
+SLEEPER_SEASON=2026
+SLEEPER_WEEK=current
+MOCK_MODE=false
+ADMIN_API_KEY=
+OVERLAY_API_KEY=
+USE_OS_KEYCHAIN=false
+```
+
+Then:
+1. Restart app.
+2. In `/admin`, set Provider to `Sleeper`.
+3. Confirm league/season/week values.
+4. Click `Save Settings`.
+5. Click `Test API Connection`.
+6. Open `/overlay/ticker`.
+
+Expected result:
+1. Test API returns success.
+2. Ticker and matchup cards render Sleeper-normalized values.
+
+### 6) Final Validation Before OBS
+
+1. In `/setup`, verify checklist passes for provider/auth/league/data.
+2. Copy scene URLs from Scene Presets.
+3. Add URLs to OBS Browser Sources.
+4. Confirm the overlay updates at least once without page refresh.
 
 ## Provider Setup
 
@@ -529,21 +693,6 @@ Syntax check:
 npm run check:syntax
 ```
 
-Refresh screenshots + manifest:
-```bash
-npm run screenshots:refresh
-```
-
-Generate demo GIF:
-```bash
-npm run demo:gif
-```
-
-Generate changelog:
-```bash
-npm run changelog:generate -- 1.0.0
-```
-
 ## Docker (Optional)
 
 Build and run with compose:
@@ -628,14 +777,6 @@ Fix:
 1. Enable history in admin.
 2. Use Node version with `node:sqlite` support.
 3. Confirm `cache/history.db` is being created.
-
-### GitHub Actions release workflow failed
-
-Fix checklist:
-1. Run locally: `npm run check:syntax && npm test`.
-2. Refresh screenshots if manifest mismatch:
-   - `npm run screenshots:refresh`
-3. Re-run release after commit includes changed manifest/assets.
 
 ## Repository Details and Metadata
 

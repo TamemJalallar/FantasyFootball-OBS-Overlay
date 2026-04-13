@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">Where to find ESPN SWID and espn_s2 cookies</title>
+  <desc id="desc">Quick visual guide for locating SWID and espn_s2 in browser developer tools.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a1220" />
+      <stop offset="100%" stop-color="#101b2f" />
+    </linearGradient>
+    <style>
+      .h1 { font: 700 36px Arial, sans-serif; fill: #eef3ff; }
+      .h2 { font: 700 24px Arial, sans-serif; fill: #f7fbff; }
+      .p { font: 500 18px Arial, sans-serif; fill: #d8e3ff; }
+      .mono { font: 600 17px 'Courier New', monospace; fill: #9af3e7; }
+      .step { fill: rgba(18, 33, 58, 0.86); stroke: #355a91; stroke-width: 2; rx: 14; }
+      .num { font: 700 20px Arial, sans-serif; fill: #7fd1ff; }
+      .arrow { stroke: #5f8fcc; stroke-width: 3; fill: none; marker-end: url(#arrowHead); }
+      .warn { font: 600 16px Arial, sans-serif; fill: #ffd58f; }
+      .chip { fill: rgba(27, 51, 86, 0.95); stroke: #4f7fc0; stroke-width: 1.5; rx: 8; }
+    </style>
+    <marker id="arrowHead" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#5f8fcc" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="700" fill="url(#bg)" />
+
+  <text x="60" y="72" class="h1">ESPN Private League: Where To Find SWID + espn_s2</text>
+  <text x="60" y="106" class="p">Use this only for your own account and keep values private.</text>
+
+  <rect x="60" y="150" width="500" height="120" class="step" />
+  <text x="84" y="185" class="num">1</text>
+  <text x="120" y="185" class="h2">Open your ESPN Fantasy league in a browser</text>
+  <text x="120" y="217" class="p">Stay logged in with the same ESPN account that has league access.</text>
+
+  <rect x="640" y="150" width="500" height="170" class="step" />
+  <text x="664" y="185" class="num">2</text>
+  <text x="700" y="185" class="h2">Open DevTools and go to Cookies</text>
+  <text x="700" y="217" class="p">Chrome: Developer Tools -> Application -> Storage -> Cookies</text>
+  <text x="700" y="247" class="p">Then select:</text>
+  <rect x="700" y="260" width="300" height="34" class="chip" />
+  <text x="714" y="283" class="mono">https://fantasy.espn.com</text>
+
+  <rect x="60" y="360" width="500" height="170" class="step" />
+  <text x="84" y="395" class="num">3</text>
+  <text x="120" y="395" class="h2">Copy these exact cookie names</text>
+  <rect x="120" y="420" width="110" height="34" class="chip" />
+  <text x="138" y="443" class="mono">SWID</text>
+  <rect x="250" y="420" width="130" height="34" class="chip" />
+  <text x="266" y="443" class="mono">espn_s2</text>
+  <text x="120" y="481" class="p">Keep SWID braces if present: {XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}</text>
+
+  <rect x="640" y="360" width="500" height="170" class="step" />
+  <text x="664" y="395" class="num">4</text>
+  <text x="700" y="395" class="h2">Paste values into the Admin page</text>
+  <text x="700" y="427" class="p">/admin -> League & Polling -> ESPN fields:</text>
+  <rect x="700" y="442" width="140" height="34" class="chip" />
+  <text x="714" y="465" class="mono">ESPN SWID</text>
+  <rect x="860" y="442" width="120" height="34" class="chip" />
+  <text x="874" y="465" class="mono">ESPN S2</text>
+  <text x="700" y="503" class="p">Save settings, then run Test API Connection.</text>
+
+  <path d="M560 210 L640 210" class="arrow" />
+  <path d="M890 320 L890 360" class="arrow" />
+  <path d="M560 445 L640 445" class="arrow" />
+
+  <text x="60" y="620" class="warn">If data still fails: refresh cookies from a new logged-in session and verify season/week.</text>
+</svg>
