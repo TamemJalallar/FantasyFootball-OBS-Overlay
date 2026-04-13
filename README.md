@@ -168,6 +168,7 @@ From `/admin` you can:
 - save/switch/delete profiles (multi-league)
 - force refresh and force next matchup
 - export/import config JSON
+- use Scene Setup Map cards (labeled presets, placement guidance, copy-ready URLs/scene names)
 - view diagnostics/events history
 - export matchup timeline as JSON or CSV from history store
 - configure audio hook and OBS scene automation

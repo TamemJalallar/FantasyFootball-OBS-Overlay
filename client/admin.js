@@ -44,6 +44,54 @@ const THEME_PACKS = {
   }
 };
 
+const SCENE_SETUP_PRESETS = [
+  {
+    id: 'centered-card',
+    label: 'Main Matchup - Centered Card',
+    route: '/overlay/centered-card',
+    purpose: 'Primary head-to-head coverage',
+    placement: 'Center screen',
+    size: '1920x1080',
+    notes: 'Best for full-screen matchup reads and rotation focus.'
+  },
+  {
+    id: 'lower-third',
+    label: 'Scoreboard - Lower Third',
+    route: '/overlay/lower-third',
+    purpose: 'In-game score strip',
+    placement: 'Bottom third',
+    size: '1920x420',
+    notes: 'Ideal while showing gameplay or host camera above.'
+  },
+  {
+    id: 'sidebar-widget',
+    label: 'Sidebar - Two Up Ready',
+    route: '/overlay/sidebar-widget',
+    purpose: 'Persistent side panel',
+    placement: 'Right side',
+    size: '640x1080',
+    notes: 'Use with two-up mode when comparing two matchups.'
+  },
+  {
+    id: 'bottom-ticker',
+    label: 'Ticker Bar - Footer',
+    route: '/overlay/bottom-ticker',
+    purpose: 'Continuous matchup crawl',
+    placement: 'Bottom edge',
+    size: '1920x220',
+    notes: 'Great for always-on context with minimal screen usage.'
+  },
+  {
+    id: 'ticker',
+    label: 'Ticker-Only Mode',
+    route: '/overlay/ticker',
+    purpose: 'Dedicated horizontal ticker scene',
+    placement: 'Bottom edge',
+    size: '1920x140',
+    notes: 'Use between segments or for pregame waiting scenes.'
+  }
+];
+
 const state = {
   settings: null,
   status: null,
@@ -260,6 +308,7 @@ function refreshOverlayLinks() {
   $('overlayUrl').value = overlayUrl;
   $('openOverlayPreviewLink').href = overlayUrl;
   renderPresetLinks(base);
+  renderSceneSetupCards(base);
 }
 
 function renderProfiles() {
@@ -717,6 +766,99 @@ function renderPresetLinks(base) {
   node.innerHTML = links
     .map((link) => `<div><strong>${link.label}:</strong> <a href="${link.url}" target="_blank" rel="noreferrer">${link.url}</a></div>`)
     .join('');
+}
+
+function createSceneMetaLine(label, value) {
+  const row = document.createElement('p');
+  row.innerHTML = `<strong>${label}:</strong> ${value}`;
+  return row;
+}
+
+function renderSceneSetupCards(base) {
+  const node = $('sceneSetupCards');
+  if (!node) {
+    return;
+  }
+
+  const origin = window.location.origin;
+  const normalizedBase = base || `${origin}/overlay`;
+  node.innerHTML = '';
+
+  for (const preset of SCENE_SETUP_PRESETS) {
+    const route = preset.route.startsWith('/overlay/')
+      ? `${origin}${preset.route}`
+      : normalizedBase;
+    const url = buildOverlayUrl(route);
+
+    const card = document.createElement('article');
+    card.className = 'scene-card';
+
+    const title = document.createElement('h3');
+    title.textContent = preset.label;
+    card.appendChild(title);
+
+    const kicker = document.createElement('p');
+    kicker.className = 'scene-kicker';
+    kicker.textContent = `Preset route: ${preset.route}`;
+    card.appendChild(kicker);
+
+    const meta = document.createElement('div');
+    meta.className = 'scene-meta';
+    meta.appendChild(createSceneMetaLine('Use Case', preset.purpose));
+    meta.appendChild(createSceneMetaLine('Placement', preset.placement));
+    meta.appendChild(createSceneMetaLine('Source Size', preset.size));
+    meta.appendChild(createSceneMetaLine('Notes', preset.notes));
+    card.appendChild(meta);
+
+    const urlInput = document.createElement('input');
+    urlInput.className = 'scene-url';
+    urlInput.type = 'text';
+    urlInput.readOnly = true;
+    urlInput.value = url;
+    card.appendChild(urlInput);
+
+    const actions = document.createElement('div');
+    actions.className = 'scene-actions';
+
+    const preview = document.createElement('a');
+    preview.className = 'btn ghost';
+    preview.href = url;
+    preview.target = '_blank';
+    preview.rel = 'noreferrer';
+    preview.textContent = 'Preview';
+    actions.appendChild(preview);
+
+    const copyUrl = document.createElement('button');
+    copyUrl.className = 'btn ghost';
+    copyUrl.type = 'button';
+    copyUrl.textContent = 'Copy URL';
+    copyUrl.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        notify('testResult', `Copied URL for "${preset.label}".`, true);
+      } catch {
+        notify('testResult', `Clipboard copy failed for "${preset.label}".`, false);
+      }
+    });
+    actions.appendChild(copyUrl);
+
+    const copyLabel = document.createElement('button');
+    copyLabel.className = 'btn ghost';
+    copyLabel.type = 'button';
+    copyLabel.textContent = 'Copy Scene Label';
+    copyLabel.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(preset.label);
+        notify('testResult', `Copied scene label "${preset.label}".`, true);
+      } catch {
+        notify('testResult', `Clipboard copy failed for "${preset.label}".`, false);
+      }
+    });
+    actions.appendChild(copyLabel);
+
+    card.appendChild(actions);
+    node.appendChild(card);
+  }
 }
 
 function formatMsCompact(ms) {
