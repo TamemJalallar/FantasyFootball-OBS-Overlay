@@ -349,6 +349,24 @@
           </div>
 
           <div class="row split">
+            <label>Matchup Scope
+              <select id="matchupScope">
+                <option value="league">All League Matchups</option>
+                <option value="team">Only One Team</option>
+              </select>
+            </label>
+            <label>Focus Team (team key or exact team name)
+              <input id="focusTeam" type="text" list="focusTeamList" placeholder="449.l.12345.t.1" />
+              <datalist id="focusTeamList"></datalist>
+            </label>
+          </div>
+
+          <div class="row">
+            <button id="refreshFocusTeamsBtn" class="btn ghost" type="button">Refresh Team List</button>
+            <span class="hint" id="focusTeamHint">Team list suggestions come from latest matchup snapshot.</span>
+          </div>
+
+          <div class="row split">
             <label>Rotation Interval (ms)
               <input id="rotationIntervalMs" type="number" min="3000" step="500" />
             </label>

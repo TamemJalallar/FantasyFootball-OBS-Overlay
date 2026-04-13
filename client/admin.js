@@ -50,6 +50,7 @@ const state = {
   auth: null,
   profiles: [],
   activeProfileId: null,
+  focusTeamChoices: [],
   diagnostics: null,
   diagnosticsTimer: null,
   statusTimer: null
@@ -166,6 +167,101 @@ function setWeekMode(mode, weekNumber) {
   setScopedWeekMode('weekMode', 'weekNumber', mode, weekNumber, 1);
 }
 
+function normalizeLookup(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function extractFocusTeamsFromPayload(payload) {
+  const byKey = new Map();
+  const matchups = payload?.matchups || [];
+
+  for (const matchup of matchups) {
+    for (const team of [matchup?.teamA, matchup?.teamB]) {
+      const key = String(team?.key || '').trim();
+      if (!key || byKey.has(key)) {
+        continue;
+      }
+      byKey.set(key, {
+        key,
+        name: String(team?.name || key).trim(),
+        manager: String(team?.manager || '').trim()
+      });
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function renderFocusTeamSuggestions(choices, selectedValue = '') {
+  const datalist = $('focusTeamList');
+  datalist.innerHTML = '';
+
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = choice.key;
+    const detail = [choice.name, choice.manager].filter(Boolean).join(' - ');
+    option.label = detail || choice.key;
+    datalist.appendChild(option);
+  }
+
+  const normalizedSelected = normalizeLookup(selectedValue);
+  const known = choices.some((choice) => (
+    normalizeLookup(choice.key) === normalizedSelected
+    || normalizeLookup(choice.name) === normalizedSelected
+  ));
+
+  if (normalizedSelected && !known) {
+    const manual = document.createElement('option');
+    manual.value = selectedValue;
+    manual.label = 'Manual value';
+    datalist.appendChild(manual);
+  }
+}
+
+function syncMatchupScopeControls() {
+  const scope = $('matchupScope').value === 'team' ? 'team' : 'league';
+  const isTeamScope = scope === 'team';
+
+  $('focusTeam').disabled = !isTeamScope;
+  $('refreshFocusTeamsBtn').disabled = !isTeamScope;
+
+  if (!isTeamScope) {
+    $('focusTeamHint').textContent = 'League scope active: overlay rotates all matchups.';
+  }
+}
+
+function appendScopeParams(url) {
+  const scope = $('matchupScope')?.value === 'team' ? 'team' : 'league';
+  const focusTeam = ($('focusTeam')?.value || '').trim();
+  const parsed = new URL(url, window.location.origin);
+
+  if (scope === 'team') {
+    parsed.searchParams.set('scope', 'team');
+    if (focusTeam) {
+      parsed.searchParams.set('team', focusTeam);
+    } else {
+      parsed.searchParams.delete('team');
+    }
+  } else {
+    parsed.searchParams.delete('scope');
+    parsed.searchParams.delete('team');
+  }
+
+  return parsed.toString();
+}
+
+function buildOverlayUrl(baseUrl) {
+  return appendScopeParams(appendOverlayKey(baseUrl));
+}
+
+function refreshOverlayLinks() {
+  const base = `${window.location.origin}/overlay`;
+  const overlayUrl = buildOverlayUrl(base);
+  $('overlayUrl').value = overlayUrl;
+  $('openOverlayPreviewLink').href = overlayUrl;
+  renderPresetLinks(base);
+}
+
 function renderProfiles() {
   const select = $('profileSelect');
 
@@ -263,10 +359,14 @@ function fillForm(settings) {
   $('teamOverrides').value = JSON.stringify(settings.league.teamNameOverrides || {}, null, 2);
 
   $('overlayMode').value = settings.overlay.mode;
+  $('matchupScope').value = settings.overlay.matchupScope === 'team' ? 'team' : 'league';
+  $('focusTeam').value = settings.overlay.focusTeam || '';
   $('scenePreset').value = settings.overlay.scenePreset;
   $('rotationIntervalMs').value = settings.overlay.rotationIntervalMs;
   $('fontScale').value = settings.theme.fontScale;
   $('themePack').value = settings.overlay.themePack || 'neon-grid';
+  syncMatchupScopeControls();
+  renderFocusTeamSuggestions(state.focusTeamChoices, $('focusTeam').value);
 
   $('twoMatchupLayout').checked = Boolean(settings.overlay.twoMatchupLayout);
   $('compactLayout').checked = settings.overlay.layout === 'compact';
@@ -342,10 +442,7 @@ function fillForm(settings) {
 
   applyThemePreview();
 
-  const overlayUrl = appendOverlayKey(`${window.location.origin}/overlay`);
-  $('overlayUrl').value = overlayUrl;
-  $('openOverlayPreviewLink').href = overlayUrl;
-  renderPresetLinks(`${window.location.origin}/overlay`);
+  refreshOverlayLinks();
 }
 
 function collectForm() {
@@ -436,6 +533,8 @@ function collectForm() {
     },
     overlay: {
       mode: $('overlayMode').value,
+      matchupScope: $('matchupScope').value === 'team' ? 'team' : 'league',
+      focusTeam: $('focusTeam').value.trim(),
       scenePreset: $('scenePreset').value,
       rotationIntervalMs: numberValue($('rotationIntervalMs'), 9000),
       twoMatchupLayout: bool($('twoMatchupLayout')),
@@ -554,6 +653,31 @@ async function refreshProfiles() {
   renderProfiles();
 }
 
+async function refreshFocusTeams({ silent = false } = {}) {
+  try {
+    const snapshot = await fetchJson('/api/data');
+    const choices = extractFocusTeamsFromPayload(snapshot.payload || {});
+    state.focusTeamChoices = choices;
+    renderFocusTeamSuggestions(choices, $('focusTeam').value || '');
+    syncMatchupScopeControls();
+
+    const source = String(snapshot?.payload?.league?.source || '').toUpperCase();
+    if (choices.length) {
+      $('focusTeamHint').textContent = `Loaded ${choices.length} teams from ${source || 'LATEST'} snapshot.`;
+    } else {
+      $('focusTeamHint').textContent = 'No teams in snapshot yet. Run Test API Connection or Force Refresh.';
+    }
+    return choices;
+  } catch (error) {
+    if (!silent) {
+      notify('testResult', `Unable to refresh focus-team list: ${error.message}`, false);
+    }
+    syncMatchupScopeControls();
+    $('focusTeamHint').textContent = 'Team list unavailable. Save settings and test the provider first.';
+    return [];
+  }
+}
+
 async function load() {
   const rememberedKey = localStorage.getItem(ADMIN_KEY_STORAGE) || '';
   if (rememberedKey) {
@@ -569,6 +693,7 @@ async function load() {
   state.auth = statusPayload.auth;
 
   fillForm(settings);
+  await refreshFocusTeams({ silent: true });
   refreshAuthPills();
   updateStatusLine();
 
@@ -581,12 +706,12 @@ function renderPresetLinks(base) {
   const origin = window.location.origin;
   const normalizedBase = base || `${origin}/overlay`;
   const links = [
-    { label: 'Centered Card', url: appendOverlayKey(`${origin}/overlay/centered-card`) },
-    { label: 'Lower Third', url: appendOverlayKey(`${origin}/overlay/lower-third`) },
-    { label: 'Sidebar Widget', url: appendOverlayKey(`${origin}/overlay/sidebar-widget`) },
-    { label: 'Bottom Ticker', url: appendOverlayKey(`${origin}/overlay/bottom-ticker`) },
-    { label: 'Ticker Mode', url: appendOverlayKey(`${origin}/overlay/ticker`) },
-    { label: 'Two-Up Sidebar', url: appendOverlayKey(`${normalizedBase}?preset=sidebar-widget&twoUp=1&scale=0.95`) }
+    { label: 'Centered Card', url: buildOverlayUrl(`${origin}/overlay/centered-card`) },
+    { label: 'Lower Third', url: buildOverlayUrl(`${origin}/overlay/lower-third`) },
+    { label: 'Sidebar Widget', url: buildOverlayUrl(`${origin}/overlay/sidebar-widget`) },
+    { label: 'Bottom Ticker', url: buildOverlayUrl(`${origin}/overlay/bottom-ticker`) },
+    { label: 'Ticker Mode', url: buildOverlayUrl(`${origin}/overlay/ticker`) },
+    { label: 'Two-Up Sidebar', url: buildOverlayUrl(`${normalizedBase}?preset=sidebar-widget&twoUp=1&scale=0.95`) }
   ];
 
   node.innerHTML = links
@@ -664,6 +789,7 @@ async function saveSettings() {
   });
 
   fillForm(result.settings);
+  await refreshFocusTeams({ silent: true });
   await refreshStatus();
   await refreshDiagnostics();
 }
@@ -717,7 +843,10 @@ async function testConnection() {
       );
     }
 
-    await refreshStatus();
+    await Promise.all([
+      refreshStatus(),
+      refreshFocusTeams({ silent: true })
+    ]);
   } catch (error) {
     notify('testResult', error.message, false);
   }
@@ -725,7 +854,10 @@ async function testConnection() {
 
 async function forceRefresh() {
   await fetchJson('/api/refresh', { method: 'POST' });
-  await refreshStatus();
+  await Promise.all([
+    refreshStatus(),
+    refreshFocusTeams({ silent: true })
+  ]);
   await refreshDiagnostics();
 }
 
@@ -886,6 +1018,7 @@ async function switchSelectedProfile() {
   });
 
   fillForm(payload.settings);
+  await refreshFocusTeams({ silent: true });
   state.profiles = payload.profiles || [];
   state.activeProfileId = payload.activeProfileId || null;
   renderProfiles();
@@ -930,6 +1063,23 @@ function bindEvents() {
   });
 
   $('themePackApplyBtn').addEventListener('click', applyThemePack);
+
+  $('matchupScope').addEventListener('change', () => {
+    syncMatchupScopeControls();
+    refreshOverlayLinks();
+  });
+
+  $('focusTeam').addEventListener('input', () => {
+    refreshOverlayLinks();
+  });
+
+  $('refreshFocusTeamsBtn').addEventListener('click', () => {
+    refreshFocusTeams()
+      .then((choices) => {
+        notify('testResult', `Team suggestions refreshed (${choices.length}).`, true);
+      })
+      .catch((error) => notify('testResult', error.message, false));
+  });
 
   $('saveBtn').addEventListener('click', async () => {
     try {
@@ -1086,10 +1236,7 @@ function bindEvents() {
   });
 
   $('overlayApiKeyInput').addEventListener('input', () => {
-    const overlayUrl = appendOverlayKey(`${window.location.origin}/overlay`);
-    $('overlayUrl').value = overlayUrl;
-    $('openOverlayPreviewLink').href = overlayUrl;
-    renderPresetLinks(`${window.location.origin}/overlay`);
+    refreshOverlayLinks();
   });
 
   state.statusTimer = setInterval(() => {

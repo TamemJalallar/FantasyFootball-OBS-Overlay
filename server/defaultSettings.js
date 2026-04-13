@@ -73,6 +73,8 @@ const DEFAULT_SETTINGS = {
   },
   overlay: {
     mode: 'carousel',
+    matchupScope: 'league',
+    focusTeam: '',
     rotationIntervalMs: 9000,
     layout: 'full',
     twoMatchupLayout: false,

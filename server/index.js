@@ -184,29 +184,47 @@ app.get('/overlay', requireOverlayRead, (_req, res) => {
   res.sendFile(path.resolve(rootDir, 'client', 'overlay.html'));
 });
 
+function buildOverlayRedirectUrl(req, defaults = {}) {
+  const params = new URLSearchParams();
+  const query = req.query || {};
+
+  for (const [key, rawValue] of Object.entries(query)) {
+    const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+
+  for (const [key, value] of Object.entries(defaults)) {
+    if (value === undefined || value === null || value === '') {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+
+  const suffix = params.toString();
+  return suffix ? `/overlay?${suffix}` : '/overlay';
+}
+
 app.get('/overlay/centered-card', requireOverlayRead, (req, res) => {
-  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
-  res.redirect(`/overlay?preset=centered-card${suffix}`);
+  res.redirect(buildOverlayRedirectUrl(req, { preset: 'centered-card' }));
 });
 
 app.get('/overlay/lower-third', requireOverlayRead, (req, res) => {
-  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
-  res.redirect(`/overlay?preset=lower-third${suffix}`);
+  res.redirect(buildOverlayRedirectUrl(req, { preset: 'lower-third' }));
 });
 
 app.get('/overlay/sidebar-widget', requireOverlayRead, (req, res) => {
-  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
-  res.redirect(`/overlay?preset=sidebar-widget${suffix}`);
+  res.redirect(buildOverlayRedirectUrl(req, { preset: 'sidebar-widget' }));
 });
 
 app.get('/overlay/bottom-ticker', requireOverlayRead, (req, res) => {
-  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
-  res.redirect(`/overlay?preset=bottom-ticker${suffix}`);
+  res.redirect(buildOverlayRedirectUrl(req, { preset: 'bottom-ticker' }));
 });
 
 app.get('/overlay/ticker', requireOverlayRead, (req, res) => {
-  const suffix = req.query.overlayKey ? `&overlayKey=${encodeURIComponent(String(req.query.overlayKey))}` : '';
-  res.redirect(`/overlay?mode=ticker&preset=bottom-ticker${suffix}`);
+  res.redirect(buildOverlayRedirectUrl(req, { mode: 'ticker', preset: 'bottom-ticker' }));
 });
 
 app.get('/events', requireOverlayRead, async (req, res) => {

@@ -147,6 +147,8 @@ function applyValidation(settings) {
   settings.sleeper.week = normalizeWeekValue(settings.sleeper.week, { min: 1, max: 25, fallback: 'current' });
 
   settings.overlay.mode = settings.overlay.mode === 'ticker' ? 'ticker' : 'carousel';
+  settings.overlay.matchupScope = settings.overlay.matchupScope === 'team' ? 'team' : 'league';
+  settings.overlay.focusTeam = String(settings.overlay.focusTeam || '').trim();
   settings.overlay.layout = settings.overlay.layout === 'compact' ? 'compact' : 'full';
 
   const presets = new Set(['bottom-ticker', 'sidebar-widget', 'lower-third', 'centered-card']);

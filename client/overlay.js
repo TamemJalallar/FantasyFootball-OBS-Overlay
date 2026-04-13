@@ -62,11 +62,12 @@ function setTransportIndicator({ fallback, detail = '' }) {
 }
 
 function computePayloadRenderKey(payload) {
-  if (!payload?.matchups?.length) {
+  const scopedMatchups = getScopedMatchupsFromPayload(payload);
+  if (!scopedMatchups.length) {
     return 'empty';
   }
 
-  return payload.matchups
+  return scopedMatchups
     .map((matchup) => [
       matchup.id,
       matchup.status,
@@ -103,7 +104,63 @@ function parseQueryOverrides(settings) {
     override.overlay.twoMatchupLayout = true;
   }
 
+  if (query.get('scope')) {
+    override.overlay.matchupScope = query.get('scope') === 'team' ? 'team' : 'league';
+  }
+
+  if (query.get('team')) {
+    override.overlay.focusTeam = String(query.get('team') || '').trim();
+  }
+
   return override;
+}
+
+function normalizeLookup(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function matchupHasFocusTeam(matchup, focusTeam) {
+  const needle = normalizeLookup(focusTeam);
+  if (!needle) {
+    return true;
+  }
+
+  for (const team of [matchup?.teamA, matchup?.teamB]) {
+    const key = normalizeLookup(team?.key);
+    const id = normalizeLookup(team?.id);
+    const name = normalizeLookup(team?.name);
+    const manager = normalizeLookup(team?.manager);
+
+    if (needle === key || needle === id || needle === name || needle === manager) {
+      return true;
+    }
+
+    if (needle.length >= 3 && name && name.includes(needle)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getScopedMatchupsFromPayload(payload = state.payload) {
+  const all = payload?.matchups || [];
+  if (!all.length) {
+    return [];
+  }
+
+  const scope = state.settings?.overlay?.matchupScope === 'team' ? 'team' : 'league';
+  if (scope !== 'team') {
+    return all;
+  }
+
+  const focusTeam = String(state.settings?.overlay?.focusTeam || '').trim();
+  if (!focusTeam) {
+    return all;
+  }
+
+  const filtered = all.filter((matchup) => matchupHasFocusTeam(matchup, focusTeam));
+  return filtered.length ? filtered : all;
 }
 
 function setBodyClasses(settings) {
@@ -219,7 +276,7 @@ function isRedzoneLockActive() {
 }
 
 function getRotatingMatchups() {
-  const all = state.payload?.matchups || [];
+  const all = getScopedMatchupsFromPayload(state.payload);
   if (!all.length) {
     return [];
   }
@@ -265,7 +322,7 @@ function primeRedzoneFocus({ payload, scoreChanges = [], tdEvents = [], leadChan
     if (td?.matchupId) focusIds.add(td.matchupId);
   }
 
-  const ranked = [...(payload?.matchups || [])]
+  const ranked = [...getScopedMatchupsFromPayload(payload)]
     .filter((matchup) => matchup?.isLive)
     .map((matchup) => {
       const diff = Number(matchup.scoreDiff || 99);
@@ -542,7 +599,7 @@ function renderTickerMode() {
   carouselStage.classList.add('hidden');
   stage.classList.remove('hidden');
 
-  const matchups = state.payload?.matchups || [];
+  const matchups = getScopedMatchupsFromPayload(state.payload);
 
   if (!matchups.length) {
     stage.innerHTML = '<div class="ticker-track"><span class="ticker-item">No live data.</span></div>';
@@ -560,13 +617,14 @@ function renderTickerMode() {
 function renderFooterTicker() {
   const footer = $('footerTicker');
 
-  if (!state.settings.overlay.showTicker || !state.payload?.matchups?.length) {
+  const matchups = getScopedMatchupsFromPayload(state.payload);
+  if (!state.settings.overlay.showTicker || !matchups.length) {
     footer.classList.add('hidden');
     footer.innerHTML = '';
     return;
   }
 
-  const line = [...state.payload.matchups, ...state.payload.matchups]
+  const line = [...matchups, ...matchups]
     .map((m) => `${tickerText(m)} (${m.status.toUpperCase()})`)
     .join('    •    ');
 

@@ -139,6 +139,7 @@ Reliability controls:
 ## Overlay Features
 
 - carousel or ticker mode
+- matchup scope: full league or a single focus team
 - one-matchup or two-matchup layout
 - score/projection/record/logo toggles
 - smooth transitions for matchup rotation
@@ -160,6 +161,7 @@ From `/admin` you can:
 - configure schedule-aware polling window and off-hours poll rates
 - tune adaptive polling + circuit breaker
 - enable safe mode fallback behavior
+- set matchup scope to all league matchups or one team only (with team picker suggestions)
 - enable/disable projections/records/logos/ticker
 - set theme colors/font scale/layout mode
 - switch theme packs with one click
@@ -180,6 +182,8 @@ Useful params:
 - `preset=sidebar-widget`
 - `preset=bottom-ticker`
 - `mode=ticker`
+- `scope=team`
+- `team=<team_key_or_name>`
 - `twoUp=1`
 - `scale=0.90`
 
@@ -192,6 +196,7 @@ Direct scene routes (OBS-friendly):
 
 Example:
 - `http://localhost:3030/overlay?preset=lower-third&scale=0.95`
+- `http://localhost:3030/overlay/centered-card?scope=team&team=449.l.12345.t.1`
 
 ## OBS Browser Source Setup
 
