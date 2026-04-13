@@ -321,6 +321,43 @@ textarea {
   gap: 8px;
 }
 
+.checklist-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.check-item {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(117, 134, 170, 0.28);
+  background: rgba(8, 14, 26, 0.65);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.check-item strong {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.check-item.ok {
+  border-color: rgba(19, 241, 183, 0.5);
+  color: #d7fff4;
+}
+
+.check-item.warn {
+  border-color: rgba(255, 174, 96, 0.45);
+  color: #ffdfbf;
+}
+
 .preview {
   margin-top: 12px;
   border: 1px dashed rgba(133, 151, 184, 0.45);
@@ -440,6 +477,10 @@ code {
   }
 
   .scene-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .checklist-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -1,6 +1,8 @@
 const $ = (id) => document.getElementById(id);
 
 const ADMIN_KEY_STORAGE = 'obs_overlay_admin_key';
+const PROVIDER_VISUAL_PROFILES_STORAGE = 'obs_overlay_provider_visual_profiles';
+const PROVIDER_KEYS = ['yahoo', 'espn', 'sleeper', 'mock'];
 
 const THEME_PACKS = {
   'neon-grid': {
@@ -92,10 +94,22 @@ const SCENE_SETUP_PRESETS = [
   }
 ];
 
+const SETUP_CHECK_ITEMS = [
+  { id: 'provider', label: 'Provider Configured' },
+  { id: 'auth', label: 'Auth Ready' },
+  { id: 'league', label: 'League Target Set' },
+  { id: 'data', label: 'Matchup Data Loaded' },
+  { id: 'overlay', label: 'Overlay URL Ready' },
+  { id: 'viewer', label: 'Overlay Viewer Connected' }
+];
+
 const state = {
   settings: null,
   status: null,
   auth: null,
+  lastDataSnapshot: null,
+  setupChecklist: [],
+  providerVisualProfiles: {},
   profiles: [],
   activeProfileId: null,
   focusTeamChoices: [],
@@ -106,6 +120,15 @@ const state = {
 
 function bool(input) {
   return Boolean(input?.checked);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function numberValue(input, fallback = null) {
@@ -188,13 +211,33 @@ function updateStatusLine() {
 function applyThemePreview() {
   const preview = $('themePreview');
   const card = preview.querySelector('.preview-card');
+  const previewSettings = {
+    data: {
+      provider: $('providerSelect')?.value || 'yahoo'
+    },
+    overlay: {
+      providerThemeMode: $('providerThemeMode')?.value || 'auto',
+      providerThemeManual: $('providerThemeManual')?.value || 'yahoo'
+    },
+    theme: {
+      providerOverrideEnabled: bool($('providerOverrideEnabled')),
+      primary: $('primaryColor').value,
+      secondary: $('secondaryColor').value,
+      text: $('textColor').value,
+      mutedText: $('mutedTextColor').value,
+      background: $('bgColor').value || 'rgba(8, 12, 24, 0.72)',
+      providerPacks: state.settings?.theme?.providerPacks || {}
+    }
+  };
+  const colors = getPreviewThemeColors(previewSettings);
 
-  card.style.background = $('bgColor').value || 'rgba(8, 12, 24, 0.72)';
-  card.style.color = $('textColor').value;
-  card.style.borderColor = `${$('secondaryColor').value}80`;
+  card.style.background = colors.background;
+  card.style.color = colors.text;
+  card.style.borderColor = `${colors.secondary}80`;
 
-  preview.style.setProperty('--accent', $('primaryColor').value);
-  preview.style.setProperty('--accent-2', $('secondaryColor').value);
+  preview.style.setProperty('--accent', colors.primary);
+  preview.style.setProperty('--accent-2', colors.secondary);
+  renderProviderThemePreviewBadge(previewSettings);
 }
 
 function setScopedWeekMode(modeInputId, weekInputId, mode, weekNumber, fallbackWeek = 1) {
@@ -298,8 +341,23 @@ function appendScopeParams(url) {
   return parsed.toString();
 }
 
+function appendProviderThemeParams(url) {
+  const parsed = new URL(url, window.location.origin);
+  const mode = String($('providerThemeMode')?.value || 'auto').toLowerCase();
+  const manualProvider = String($('providerThemeManual')?.value || 'yahoo').toLowerCase();
+
+  parsed.searchParams.delete('providerTheme');
+  if (mode === 'off') {
+    parsed.searchParams.set('providerTheme', 'off');
+  } else if (mode === 'manual' && PROVIDER_KEYS.includes(manualProvider)) {
+    parsed.searchParams.set('providerTheme', manualProvider);
+  }
+
+  return parsed.toString();
+}
+
 function buildOverlayUrl(baseUrl) {
-  return appendScopeParams(appendOverlayKey(baseUrl));
+  return appendProviderThemeParams(appendScopeParams(appendOverlayKey(baseUrl)));
 }
 
 function refreshOverlayLinks() {
@@ -309,6 +367,76 @@ function refreshOverlayLinks() {
   $('openOverlayPreviewLink').href = overlayUrl;
   renderPresetLinks(base);
   renderSceneSetupCards(base);
+  updateSetupChecklist();
+}
+
+function normalizeProvider(raw, fallback = 'yahoo') {
+  const key = String(raw || '').trim().toLowerCase();
+  return PROVIDER_KEYS.includes(key) ? key : fallback;
+}
+
+function resolveProviderThemeModeSettings(settings) {
+  const mode = String(settings?.overlay?.providerThemeMode || 'auto').toLowerCase();
+  if (mode === 'off') {
+    return { mode: 'off', provider: null };
+  }
+  if (mode === 'manual') {
+    return {
+      mode: 'manual',
+      provider: normalizeProvider(settings?.overlay?.providerThemeManual || 'yahoo', 'yahoo')
+    };
+  }
+  const source = normalizeProvider(settings?.data?.provider || settings?.league?.source || state.lastDataSnapshot?.payload?.league?.source || 'yahoo', 'yahoo');
+  return { mode: 'auto', provider: source };
+}
+
+function getActiveProviderPack(settings) {
+  const context = resolveProviderThemeModeSettings(settings);
+  if (!context.provider || context.mode === 'off') {
+    return null;
+  }
+  return settings?.theme?.providerPacks?.[context.provider] || null;
+}
+
+function getPreviewThemeColors(settings) {
+  const pack = getActiveProviderPack(settings);
+  const useManualOverrides = Boolean(settings?.theme?.providerOverrideEnabled || settings?.overlay?.providerThemeMode === 'off');
+  if (pack && !useManualOverrides) {
+    return {
+      primary: pack.primary,
+      secondary: pack.secondary,
+      text: pack.text,
+      mutedText: pack.mutedText,
+      background: pack.background
+    };
+  }
+
+  return {
+    primary: settings?.theme?.primary || '#13f1b7',
+    secondary: settings?.theme?.secondary || '#3d5cff',
+    text: settings?.theme?.text || '#f6f8ff',
+    mutedText: settings?.theme?.mutedText || '#aab3ca',
+    background: settings?.theme?.background || 'rgba(8, 12, 24, 0.72)'
+  };
+}
+
+function renderProviderThemePreviewBadge(settings) {
+  const node = $('providerThemePreviewBadge');
+  if (!node) {
+    return;
+  }
+
+  const modeCtx = resolveProviderThemeModeSettings(settings);
+  if (modeCtx.mode === 'off' || !modeCtx.provider) {
+    node.textContent = 'Provider Theme: Off';
+    node.className = 'pill bad';
+    return;
+  }
+
+  const pack = settings?.theme?.providerPacks?.[modeCtx.provider] || {};
+  const label = (pack.badgeLabel || modeCtx.provider).toUpperCase();
+  node.textContent = `Provider Theme: ${label} (${modeCtx.mode.toUpperCase()})`;
+  node.className = 'pill good';
 }
 
 function renderProfiles() {
@@ -410,6 +538,10 @@ function fillForm(settings) {
   $('overlayMode').value = settings.overlay.mode;
   $('matchupScope').value = settings.overlay.matchupScope === 'team' ? 'team' : 'league';
   $('focusTeam').value = settings.overlay.focusTeam || '';
+  $('providerThemeMode').value = settings.overlay.providerThemeMode || 'auto';
+  $('providerThemeManual').value = settings.overlay.providerThemeManual || 'yahoo';
+  $('providerThemeManual').disabled = $('providerThemeMode').value !== 'manual';
+  $('providerBrandingEnabled').checked = settings.overlay.providerBrandingEnabled !== false;
   $('scenePreset').value = settings.overlay.scenePreset;
   $('rotationIntervalMs').value = settings.overlay.rotationIntervalMs;
   $('fontScale').value = settings.theme.fontScale;
@@ -459,6 +591,10 @@ function fillForm(settings) {
   $('textColor').value = settings.theme.text || '#f6f8ff';
   $('mutedTextColor').value = settings.theme.mutedText || '#aab3ca';
   $('bgColor').value = settings.theme.background || 'rgba(8, 12, 24, 0.72)';
+  $('providerOverrideEnabled').checked = Boolean(settings.theme.providerOverrideEnabled);
+  if (!settings.theme.providerPacks) {
+    settings.theme.providerPacks = {};
+  }
 
   $('reducedAnimations').value = String(Boolean(settings.security?.reducedAnimations));
   $('useOsKeychain').checked = Boolean(settings.security?.useOsKeychain);
@@ -490,6 +626,12 @@ function fillForm(settings) {
   $('obsSceneDefault').value = settings.obs?.scenes?.default || '';
 
   applyThemePreview();
+  renderProviderThemePreviewBadge(settings);
+  if ($('visualProfileProvider')) {
+    $('visualProfileProvider').value = normalizeProvider(settings.data.provider || settings.overlay.providerThemeManual || 'yahoo', 'yahoo');
+  }
+  updateProviderVisualProfileHint();
+  updateSetupChecklist();
 
   refreshOverlayLinks();
 }
@@ -584,6 +726,9 @@ function collectForm() {
       mode: $('overlayMode').value,
       matchupScope: $('matchupScope').value === 'team' ? 'team' : 'league',
       focusTeam: $('focusTeam').value.trim(),
+      providerThemeMode: $('providerThemeMode').value,
+      providerThemeManual: $('providerThemeManual').value,
+      providerBrandingEnabled: bool($('providerBrandingEnabled')),
       scenePreset: $('scenePreset').value,
       rotationIntervalMs: numberValue($('rotationIntervalMs'), 9000),
       twoMatchupLayout: bool($('twoMatchupLayout')),
@@ -624,11 +769,13 @@ function collectForm() {
       fontScale: numberValue($('fontScale'), 1),
       darkMode: bool($('darkMode')),
       compact: bool($('compactLayout')),
+      providerOverrideEnabled: bool($('providerOverrideEnabled')),
       primary: $('primaryColor').value,
       secondary: $('secondaryColor').value,
       background: $('bgColor').value.trim(),
       text: $('textColor').value,
-      mutedText: $('mutedTextColor').value
+      mutedText: $('mutedTextColor').value,
+      providerPacks: JSON.parse(JSON.stringify(state.settings?.theme?.providerPacks || {}))
     },
     dev: {
       showUpdatedIndicator: bool($('showUpdatedIndicator'))
@@ -705,6 +852,7 @@ async function refreshProfiles() {
 async function refreshFocusTeams({ silent = false } = {}) {
   try {
     const snapshot = await fetchJson('/api/data');
+    state.lastDataSnapshot = snapshot;
     const choices = extractFocusTeamsFromPayload(snapshot.payload || {});
     state.focusTeamChoices = choices;
     renderFocusTeamSuggestions(choices, $('focusTeam').value || '');
@@ -716,6 +864,8 @@ async function refreshFocusTeams({ silent = false } = {}) {
     } else {
       $('focusTeamHint').textContent = 'No teams in snapshot yet. Run Test API Connection or Force Refresh.';
     }
+    renderProviderThemePreviewBadge(state.settings || {});
+    updateSetupChecklist();
     return choices;
   } catch (error) {
     if (!silent) {
@@ -723,11 +873,13 @@ async function refreshFocusTeams({ silent = false } = {}) {
     }
     syncMatchupScopeControls();
     $('focusTeamHint').textContent = 'Team list unavailable. Save settings and test the provider first.';
+    updateSetupChecklist();
     return [];
   }
 }
 
 async function load() {
+  loadProviderVisualProfiles();
   const rememberedKey = localStorage.getItem(ADMIN_KEY_STORAGE) || '';
   if (rememberedKey) {
     $('adminApiKeyInput').value = rememberedKey;
@@ -743,8 +895,10 @@ async function load() {
 
   fillForm(settings);
   await refreshFocusTeams({ silent: true });
+  updateProviderVisualProfileHint();
   refreshAuthPills();
   updateStatusLine();
+  updateSetupChecklist();
 
   await refreshProfiles();
   await refreshDiagnostics();
@@ -861,6 +1015,233 @@ function renderSceneSetupCards(base) {
   }
 }
 
+function providerLabel(provider) {
+  return String(provider || '').trim().toUpperCase() || 'UNKNOWN';
+}
+
+function buildSceneSetupGuideText(base) {
+  const origin = window.location.origin;
+  const normalizedBase = base || `${origin}/overlay`;
+  const now = new Date().toISOString();
+  const lines = [
+    '# OBS Scene Setup Guide',
+    '',
+    `Generated: ${now}`,
+    '',
+    'Use these scene labels and Browser Source URLs directly in OBS.',
+    ''
+  ];
+
+  for (const preset of SCENE_SETUP_PRESETS) {
+    const route = preset.route.startsWith('/overlay/')
+      ? `${origin}${preset.route}`
+      : normalizedBase;
+    const url = buildOverlayUrl(route);
+    lines.push(`## ${preset.label}`);
+    lines.push(`- Use case: ${preset.purpose}`);
+    lines.push(`- Placement: ${preset.placement}`);
+    lines.push(`- Recommended source size: ${preset.size}`);
+    lines.push(`- Notes: ${preset.notes}`);
+    lines.push(`- URL: ${url}`);
+    lines.push('');
+  }
+
+  return `${lines.join('\n').trim()}\n`;
+}
+
+function downloadTextFile(name, content) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportSceneSetupGuide() {
+  const guide = buildSceneSetupGuideText(`${window.location.origin}/overlay`);
+  downloadTextFile('obs-scene-setup-guide.md', guide);
+}
+
+function loadProviderVisualProfiles() {
+  try {
+    const raw = localStorage.getItem(PROVIDER_VISUAL_PROFILES_STORAGE);
+    if (!raw) {
+      state.providerVisualProfiles = {};
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    state.providerVisualProfiles = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    state.providerVisualProfiles = {};
+  }
+}
+
+function persistProviderVisualProfiles() {
+  localStorage.setItem(PROVIDER_VISUAL_PROFILES_STORAGE, JSON.stringify(state.providerVisualProfiles));
+}
+
+function getSelectedVisualProvider() {
+  return normalizeProvider($('visualProfileProvider')?.value || 'yahoo', 'yahoo');
+}
+
+function updateProviderVisualProfileHint() {
+  if (!$('providerVisualProfileHint') || !$('visualProfileProvider')) {
+    return;
+  }
+  const provider = getSelectedVisualProvider();
+  const hasProfile = Boolean(state.providerVisualProfiles?.[provider]);
+  $('providerVisualProfileHint').textContent = hasProfile
+    ? `Saved profile found for ${providerLabel(provider)}.`
+    : `No saved profile yet for ${providerLabel(provider)}.`;
+}
+
+function captureCurrentVisualStateForProfile(provider) {
+  return {
+    provider,
+    savedAt: new Date().toISOString(),
+    overlay: {
+      mode: $('overlayMode').value,
+      scenePreset: $('scenePreset').value,
+      twoMatchupLayout: bool($('twoMatchupLayout')),
+      layout: bool($('compactLayout')) ? 'compact' : 'full',
+      themePack: $('themePack').value,
+      providerThemeMode: $('providerThemeMode').value,
+      providerThemeManual: $('providerThemeManual').value,
+      providerBrandingEnabled: bool($('providerBrandingEnabled')),
+      branding: {
+        fontDisplay: $('fontDisplaySelect').value,
+        fontBody: $('fontBodySelect').value
+      }
+    },
+    theme: {
+      providerOverrideEnabled: bool($('providerOverrideEnabled')),
+      primary: $('primaryColor').value,
+      secondary: $('secondaryColor').value,
+      background: $('bgColor').value.trim(),
+      text: $('textColor').value,
+      mutedText: $('mutedTextColor').value
+    }
+  };
+}
+
+function saveProviderVisualProfile() {
+  const provider = getSelectedVisualProvider();
+  state.providerVisualProfiles[provider] = captureCurrentVisualStateForProfile(provider);
+  persistProviderVisualProfiles();
+  updateProviderVisualProfileHint();
+  notify('testResult', `Saved visual profile for ${providerLabel(provider)}.`, true);
+}
+
+function applyProviderVisualProfile() {
+  const provider = getSelectedVisualProvider();
+  const profile = state.providerVisualProfiles?.[provider];
+  if (!profile) {
+    throw new Error(`No saved visual profile for ${providerLabel(provider)}.`);
+  }
+
+  $('overlayMode').value = profile.overlay?.mode || 'carousel';
+  $('scenePreset').value = profile.overlay?.scenePreset || 'centered-card';
+  $('twoMatchupLayout').checked = Boolean(profile.overlay?.twoMatchupLayout);
+  $('compactLayout').checked = profile.overlay?.layout === 'compact';
+  $('themePack').value = profile.overlay?.themePack || 'neon-grid';
+  $('providerThemeMode').value = profile.overlay?.providerThemeMode || 'auto';
+  $('providerThemeManual').value = normalizeProvider(profile.overlay?.providerThemeManual || provider, provider);
+  $('providerBrandingEnabled').checked = profile.overlay?.providerBrandingEnabled !== false;
+  $('fontDisplaySelect').value = profile.overlay?.branding?.fontDisplay || 'Rajdhani';
+  $('fontBodySelect').value = profile.overlay?.branding?.fontBody || 'Rajdhani';
+  $('providerOverrideEnabled').checked = Boolean(profile.theme?.providerOverrideEnabled);
+  $('primaryColor').value = profile.theme?.primary || '#13f1b7';
+  $('secondaryColor').value = profile.theme?.secondary || '#3d5cff';
+  $('bgColor').value = profile.theme?.background || 'rgba(8, 12, 24, 0.72)';
+  $('textColor').value = profile.theme?.text || '#f6f8ff';
+  $('mutedTextColor').value = profile.theme?.mutedText || '#aab3ca';
+
+  applyThemePreview();
+  refreshOverlayLinks();
+  syncMatchupScopeControls();
+  updateProviderVisualProfileHint();
+}
+
+function clearProviderVisualProfile() {
+  const provider = getSelectedVisualProvider();
+  delete state.providerVisualProfiles[provider];
+  persistProviderVisualProfiles();
+  updateProviderVisualProfileHint();
+  notify('testResult', `Cleared visual profile for ${providerLabel(provider)}.`, true);
+}
+
+function setChecklistNode(id, ok, detail) {
+  const node = $(`checkItem_${id}`);
+  if (!node) {
+    return;
+  }
+  node.className = `check-item ${ok ? 'ok' : 'warn'}`;
+  const dot = ok ? 'PASS' : 'TODO';
+  node.innerHTML = `<strong>${dot}</strong><span>${escapeHtml(detail)}</span>`;
+}
+
+function updateSetupChecklist() {
+  const settings = state.settings || {};
+  const provider = normalizeProvider(settings?.data?.provider || $('providerSelect')?.value || 'yahoo', 'yahoo');
+  const auth = state.auth || {};
+  const payload = state.lastDataSnapshot?.payload || null;
+  const diagnostics = state.diagnostics || {};
+  const lastSuccessAt = state.status?.lastSuccessAt ? new Date(state.status.lastSuccessAt).getTime() : 0;
+  const syncedRecently = lastSuccessAt && (Date.now() - lastSuccessAt) < (3 * 60 * 1000);
+
+  const providerConfigured = provider === 'yahoo'
+    ? Boolean(settings?.yahoo?.clientId)
+    : provider === 'espn'
+      ? Boolean(settings?.espn?.leagueId)
+      : provider === 'sleeper'
+        ? Boolean(settings?.sleeper?.leagueId)
+        : true;
+
+  const authReady = provider === 'yahoo'
+    ? Boolean(auth.configured && auth.authorized)
+    : true;
+
+  const leagueReady = provider === 'yahoo'
+    ? Boolean(settings?.league?.leagueId && (settings?.league?.gameKey || settings?.league?.season))
+    : provider === 'espn'
+      ? Boolean(settings?.espn?.leagueId && settings?.espn?.season)
+      : provider === 'sleeper'
+        ? Boolean(settings?.sleeper?.leagueId && settings?.sleeper?.season)
+        : true;
+
+  const hasData = Boolean((payload?.matchups || []).length);
+  const overlayReady = Boolean(($('overlayUrl')?.value || '').trim());
+  const viewerConnected = Number(diagnostics?.metrics?.gauges?.sse_clients_connected || 0) > 0;
+
+  setChecklistNode('provider', providerConfigured, providerConfigured
+    ? `${providerLabel(provider)} provider configuration is set.`
+    : `${providerLabel(provider)} provider settings are incomplete.`);
+
+  setChecklistNode('auth', authReady, authReady
+    ? (provider === 'yahoo' ? 'Yahoo OAuth is authorized.' : `${providerLabel(provider)} does not require OAuth here.`)
+    : 'Complete Yahoo OAuth in this admin page.');
+
+  setChecklistNode('league', leagueReady, leagueReady
+    ? 'League + season/week target is configured.'
+    : 'League target details are missing.');
+
+  setChecklistNode('data', hasData && syncedRecently, hasData
+    ? (syncedRecently ? `Matchups loaded (${payload.matchups.length}) and syncing.` : `Matchups loaded (${payload.matchups.length}) but last sync is stale.`)
+    : 'No matchup payload yet. Run Test API Connection or Force Refresh.');
+
+  setChecklistNode('overlay', overlayReady, overlayReady
+    ? 'OBS Browser Source URL is ready to paste.'
+    : 'Overlay URL not ready.');
+
+  setChecklistNode('viewer', viewerConnected, viewerConnected
+    ? 'At least one overlay/event client is connected.'
+    : 'No overlay client connected yet. Open /overlay in browser or OBS.');
+}
+
 function formatMsCompact(ms) {
   const value = Number(ms);
   if (!Number.isFinite(value) || value <= 0) {
@@ -945,6 +1326,7 @@ async function refreshStatus() {
   }
   refreshAuthPills();
   updateStatusLine();
+  updateSetupChecklist();
 }
 
 async function refreshDiagnostics() {
@@ -965,6 +1347,7 @@ async function refreshDiagnostics() {
   };
 
   $('diagnosticsOutput').textContent = JSON.stringify(output, null, 2);
+  updateSetupChecklist();
 }
 
 async function testConnection() {
@@ -1125,7 +1508,43 @@ function applyThemePack() {
   $('mutedTextColor').value = pack.theme.mutedText;
   $('bgColor').value = pack.theme.background;
   $('scenePreset').value = pack.overlay.scenePreset;
+  $('providerOverrideEnabled').checked = true;
   applyThemePreview();
+  refreshOverlayLinks();
+}
+
+function applyProviderDefaultsToForm() {
+  const settings = state.settings || {};
+  const context = resolveProviderThemeModeSettings({
+    ...settings,
+    data: {
+      ...(settings.data || {}),
+      provider: $('providerSelect')?.value || settings?.data?.provider || 'yahoo'
+    },
+    overlay: {
+      ...(settings.overlay || {}),
+      providerThemeMode: $('providerThemeMode')?.value || 'auto',
+      providerThemeManual: $('providerThemeManual')?.value || 'yahoo'
+    }
+  });
+  const provider = normalizeProvider(context.provider || $('providerThemeManual')?.value || 'yahoo', 'yahoo');
+  const pack = state.settings?.theme?.providerPacks?.[provider];
+  if (!pack) {
+    throw new Error(`No provider pack found for ${providerLabel(provider)}.`);
+  }
+
+  $('primaryColor').value = pack.primary;
+  $('secondaryColor').value = pack.secondary;
+  $('bgColor').value = pack.background;
+  $('textColor').value = pack.text;
+  $('mutedTextColor').value = pack.mutedText;
+  $('fontDisplaySelect').value = pack.displayFont || $('fontDisplaySelect').value;
+  $('fontBodySelect').value = pack.bodyFont || $('fontBodySelect').value;
+  $('providerOverrideEnabled').checked = false;
+
+  applyThemePreview();
+  refreshOverlayLinks();
+  notify('testResult', `Applied ${providerLabel(provider)} provider defaults to preview.`, true);
 }
 
 async function saveProfileFromCurrent() {
@@ -1201,10 +1620,83 @@ function bindEvents() {
   });
 
   ['primaryColor', 'secondaryColor', 'textColor', 'mutedTextColor', 'bgColor'].forEach((id) => {
-    $(id).addEventListener('input', applyThemePreview);
+    $(id).addEventListener('input', () => {
+      $('providerOverrideEnabled').checked = true;
+      applyThemePreview();
+    });
   });
 
   $('themePackApplyBtn').addEventListener('click', applyThemePack);
+  $('applyProviderDefaultsBtn').addEventListener('click', () => {
+    try {
+      applyProviderDefaultsToForm();
+    } catch (error) {
+      notify('testResult', error.message, false);
+    }
+  });
+
+  $('providerThemeMode').addEventListener('change', () => {
+    const isManual = $('providerThemeMode').value === 'manual';
+    $('providerThemeManual').disabled = !isManual;
+    applyThemePreview();
+    refreshOverlayLinks();
+  });
+
+  $('providerThemeManual').addEventListener('change', () => {
+    applyThemePreview();
+    refreshOverlayLinks();
+  });
+
+  $('providerBrandingEnabled').addEventListener('change', () => {
+    refreshOverlayLinks();
+  });
+
+  $('providerOverrideEnabled').addEventListener('change', () => {
+    applyThemePreview();
+  });
+
+  $('providerSelect').addEventListener('change', () => {
+    applyThemePreview();
+    updateSetupChecklist();
+    refreshOverlayLinks();
+  });
+
+  $('visualProfileProvider').addEventListener('change', () => {
+    updateProviderVisualProfileHint();
+  });
+
+  $('saveProviderVisualProfileBtn').addEventListener('click', () => {
+    saveProviderVisualProfile();
+  });
+
+  $('applyProviderVisualProfileBtn').addEventListener('click', () => {
+    try {
+      applyProviderVisualProfile();
+      notify('testResult', 'Provider visual profile applied.', true);
+    } catch (error) {
+      notify('testResult', error.message, false);
+    }
+  });
+
+  $('clearProviderVisualProfileBtn').addEventListener('click', () => {
+    clearProviderVisualProfile();
+  });
+
+  $('exportSceneSetupGuideBtn').addEventListener('click', () => {
+    exportSceneSetupGuide();
+    notify('testResult', 'Scene setup guide exported.', true);
+  });
+
+  $('refreshChecklistBtn').addEventListener('click', () => {
+    Promise.all([
+      refreshStatus(),
+      refreshDiagnostics(),
+      refreshFocusTeams({ silent: true })
+    ]).then(() => {
+      updateSetupChecklist();
+      notify('testResult', 'Setup checklist refreshed.', true);
+    }).catch((error) => notify('testResult', error.message, false));
+  });
 
   $('matchupScope').addEventListener('change', () => {
     syncMatchupScopeControls();

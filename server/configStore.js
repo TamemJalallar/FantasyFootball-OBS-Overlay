@@ -23,6 +23,28 @@ function normalizeWeekValue(raw, { min = 1, max = 25, fallback = 'current' } = {
   return numeric;
 }
 
+function normalizeProviderKey(raw, fallback = 'yahoo') {
+  const key = String(raw || '').trim().toLowerCase();
+  return ['yahoo', 'espn', 'sleeper', 'mock'].includes(key) ? key : fallback;
+}
+
+function normalizeProviderPack(pack, fallbackPack) {
+  const source = pack || {};
+  const fallback = fallbackPack || {};
+  return {
+    primary: String(source.primary || fallback.primary || '#13f1b7'),
+    secondary: String(source.secondary || fallback.secondary || '#3d5cff'),
+    background: String(source.background || fallback.background || 'rgba(8, 12, 24, 0.72)'),
+    text: String(source.text || fallback.text || '#f6f8ff'),
+    mutedText: String(source.mutedText || fallback.mutedText || '#aab3ca'),
+    displayFont: String(source.displayFont || fallback.displayFont || 'Rajdhani'),
+    bodyFont: String(source.bodyFont || fallback.bodyFont || 'Rajdhani'),
+    badgeLabel: String(source.badgeLabel || fallback.badgeLabel || 'Fantasy'),
+    badgeColor: String(source.badgeColor || fallback.badgeColor || '#13f1b7'),
+    badgeLogoUrl: String(source.badgeLogoUrl || fallback.badgeLogoUrl || '')
+  };
+}
+
 function applyValidation(settings) {
   const provider = String(settings.data.provider || 'yahoo').trim().toLowerCase();
   settings.data.provider = ['yahoo', 'mock', 'espn', 'sleeper'].includes(provider) ? provider : 'yahoo';
@@ -87,6 +109,11 @@ function applyValidation(settings) {
 
   settings.overlay.showTdAlerts = Boolean(settings.overlay.showTdAlerts);
   settings.overlay.showScoreDelta = Boolean(settings.overlay.showScoreDelta);
+  settings.overlay.providerThemeMode = ['auto', 'manual', 'off'].includes(String(settings.overlay.providerThemeMode || '').toLowerCase())
+    ? String(settings.overlay.providerThemeMode || '').toLowerCase()
+    : 'auto';
+  settings.overlay.providerThemeManual = normalizeProviderKey(settings.overlay.providerThemeManual, 'yahoo');
+  settings.overlay.providerBrandingEnabled = Boolean(settings.overlay.providerBrandingEnabled);
   settings.overlay.autoRedzone = settings.overlay.autoRedzone || {};
   settings.overlay.autoRedzone.enabled = Boolean(settings.overlay.autoRedzone.enabled);
   settings.overlay.autoRedzone.lockMs = clampNumber(settings.overlay.autoRedzone.lockMs, 5000, 120000, 25000);
@@ -106,6 +133,15 @@ function applyValidation(settings) {
   settings.security.reducedAnimations = Boolean(settings.security.reducedAnimations);
   settings.security.useOsKeychain = Boolean(settings.security.useOsKeychain);
   settings.security.overlayApiKey = String(settings.security.overlayApiKey || '').trim();
+  settings.theme.providerOverrideEnabled = Boolean(settings.theme.providerOverrideEnabled);
+  settings.theme.providerPacks = settings.theme.providerPacks || {};
+  const defaultProviderPacks = DEFAULT_SETTINGS.theme?.providerPacks || {};
+  for (const providerKey of ['yahoo', 'espn', 'sleeper', 'mock']) {
+    settings.theme.providerPacks[providerKey] = normalizeProviderPack(
+      settings.theme.providerPacks[providerKey],
+      defaultProviderPacks[providerKey]
+    );
+  }
   settings.audio.enabled = Boolean(settings.audio.enabled);
   settings.audio.minDispatchIntervalMs = clampNumber(settings.audio.minDispatchIntervalMs, 250, 30000, 1200);
   settings.audio.maxQueueSize = clampNumber(settings.audio.maxQueueSize, 5, 500, 50);

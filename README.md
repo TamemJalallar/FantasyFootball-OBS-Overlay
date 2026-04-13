@@ -140,6 +140,8 @@ Reliability controls:
 
 - carousel or ticker mode
 - matchup scope: full league or a single focus team
+- provider-aware theming (`auto`, `manual`, `off`) for Yahoo/ESPN/Sleeper/Mock
+- provider badge overlay (toggleable)
 - one-matchup or two-matchup layout
 - score/projection/record/logo toggles
 - smooth transitions for matchup rotation
@@ -162,6 +164,10 @@ From `/admin` you can:
 - tune adaptive polling + circuit breaker
 - enable safe mode fallback behavior
 - set matchup scope to all league matchups or one team only (with team picker suggestions)
+- configure provider theme mode and apply provider defaults in one click
+- export a scene setup guide file with labeled OBS URLs
+- use first-run setup checklist for auth/data/overlay readiness
+- save/apply provider-specific visual profiles for fast provider switching
 - enable/disable projections/records/logos/ticker
 - set theme colors/font scale/layout mode
 - switch theme packs with one click
@@ -185,6 +191,7 @@ Useful params:
 - `mode=ticker`
 - `scope=team`
 - `team=<team_key_or_name>`
+- `providerTheme=auto|off|yahoo|espn|sleeper|mock`
 - `twoUp=1`
 - `scale=0.90`
 
@@ -198,6 +205,7 @@ Direct scene routes (OBS-friendly):
 Example:
 - `http://localhost:3030/overlay?preset=lower-third&scale=0.95`
 - `http://localhost:3030/overlay/centered-card?scope=team&team=449.l.12345.t.1`
+- `http://localhost:3030/overlay/ticker?providerTheme=espn`
 
 ## OBS Browser Source Setup
 

@@ -367,6 +367,30 @@
           </div>
 
           <div class="row split">
+            <label>Provider Theme Mode
+              <select id="providerThemeMode">
+                <option value="auto">Auto (league source)</option>
+                <option value="manual">Manual provider</option>
+                <option value="off">Off (custom theme only)</option>
+              </select>
+            </label>
+            <label>Manual Provider Theme
+              <select id="providerThemeManual">
+                <option value="yahoo">Yahoo</option>
+                <option value="espn">ESPN</option>
+                <option value="sleeper">Sleeper</option>
+                <option value="mock">Mock</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="row">
+            <label class="checkbox"><input id="providerBrandingEnabled" type="checkbox" /> Provider badge on overlay</label>
+            <span class="pill" id="providerThemePreviewBadge">Provider Theme: --</span>
+            <button id="applyProviderDefaultsBtn" class="btn ghost" type="button">Use Provider Defaults</button>
+          </div>
+
+          <div class="row split">
             <label>Rotation Interval (ms)
               <input id="rotationIntervalMs" type="number" min="3000" step="500" />
             </label>
@@ -453,6 +477,10 @@
         <section class="panel">
           <h2>Theme</h2>
           <p class="subtle">Tune palette and preview style before sending it to OBS.</p>
+
+          <div class="row">
+            <label class="checkbox"><input id="providerOverrideEnabled" type="checkbox" /> Use custom color overrides on top of provider theme</label>
+          </div>
 
           <div class="row split">
             <label>Primary Accent
@@ -695,10 +723,50 @@
         <section class="panel obs">
           <h2>Scene Setup Map</h2>
           <p class="subtle">Labeled scene presets with recommended usage, placement, and one-click copy actions.</p>
+          <div class="row">
+            <button id="exportSceneSetupGuideBtn" class="btn ghost" type="button">Export Scene Setup Guide</button>
+          </div>
           <div id="sceneSetupCards" class="scene-cards"></div>
           <p class="hint">
             Tip: Use the card labels as your OBS scene names so your team can navigate quickly during stream.
           </p>
+        </section>
+
+        <section class="panel obs">
+          <h2>Setup Checklist</h2>
+          <p class="subtle">First-run health checks for provider auth, data flow, and OBS-readiness.</p>
+          <div class="row">
+            <button id="refreshChecklistBtn" class="btn ghost" type="button">Refresh Checklist</button>
+          </div>
+          <div class="checklist-grid">
+            <article class="check-item" id="checkItem_provider"><strong>TODO</strong><span>Provider configured</span></article>
+            <article class="check-item" id="checkItem_auth"><strong>TODO</strong><span>Auth ready</span></article>
+            <article class="check-item" id="checkItem_league"><strong>TODO</strong><span>League target set</span></article>
+            <article class="check-item" id="checkItem_data"><strong>TODO</strong><span>Data loaded</span></article>
+            <article class="check-item" id="checkItem_overlay"><strong>TODO</strong><span>Overlay URL ready</span></article>
+            <article class="check-item" id="checkItem_viewer"><strong>TODO</strong><span>Overlay viewer connected</span></article>
+          </div>
+        </section>
+
+        <section class="panel obs">
+          <h2>Provider Visual Profiles</h2>
+          <p class="subtle">Save and apply visual presets per provider for fast league switching.</p>
+          <div class="row split">
+            <label>Provider
+              <select id="visualProfileProvider">
+                <option value="yahoo">Yahoo</option>
+                <option value="espn">ESPN</option>
+                <option value="sleeper">Sleeper</option>
+                <option value="mock">Mock</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <button id="saveProviderVisualProfileBtn" class="btn ghost" type="button">Save Current Visual Profile</button>
+            <button id="applyProviderVisualProfileBtn" class="btn ghost" type="button">Apply Saved Profile</button>
+            <button id="clearProviderVisualProfileBtn" class="btn ghost" type="button">Clear Saved Profile</button>
+          </div>
+          <p class="hint" id="providerVisualProfileHint">No saved profile yet.</p>
         </section>
       </main>
     </div>

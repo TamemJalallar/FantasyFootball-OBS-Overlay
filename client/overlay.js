@@ -12,6 +12,7 @@ const createMatchupCard = templates.createMatchupCard || (() => '<section class=
 const createStoryCard = templates.createStoryCard || ((story) => `<section class="matchup-card"><p>${escapeHtml(story?.title || 'Story')}</p></section>`);
 
 const query = new URLSearchParams(window.location.search);
+const KNOWN_PROVIDERS = new Set(['yahoo', 'espn', 'sleeper', 'mock']);
 
 const state = {
   settings: null,
@@ -112,6 +113,14 @@ function parseQueryOverrides(settings) {
     override.overlay.focusTeam = String(query.get('team') || '').trim();
   }
 
+  const providerTheme = String(query.get('providerTheme') || '').trim().toLowerCase();
+  if (providerTheme === 'off' || providerTheme === 'auto') {
+    override.overlay.providerThemeMode = providerTheme;
+  } else if (KNOWN_PROVIDERS.has(providerTheme)) {
+    override.overlay.providerThemeMode = 'manual';
+    override.overlay.providerThemeManual = providerTheme;
+  }
+
   return override;
 }
 
@@ -177,18 +186,160 @@ function setBodyClasses(settings) {
   }
 }
 
+function normalizeProvider(raw, fallback = 'yahoo') {
+  const key = String(raw || '').trim().toLowerCase();
+  return KNOWN_PROVIDERS.has(key) ? key : fallback;
+}
+
+function getOverlayProviderSource() {
+  return normalizeProvider(
+    state.payload?.league?.source || state.settings?.data?.provider || 'yahoo',
+    'yahoo'
+  );
+}
+
+function getProviderThemeContext(settings) {
+  const mode = String(settings?.overlay?.providerThemeMode || 'auto').toLowerCase();
+  if (mode === 'off') {
+    return { mode: 'off', provider: null };
+  }
+
+  if (mode === 'manual') {
+    return {
+      mode: 'manual',
+      provider: normalizeProvider(settings?.overlay?.providerThemeManual || 'yahoo', 'yahoo')
+    };
+  }
+
+  return {
+    mode: 'auto',
+    provider: getOverlayProviderSource()
+  };
+}
+
+function getThemePackForProvider(settings, provider) {
+  if (!provider) {
+    return null;
+  }
+  return settings?.theme?.providerPacks?.[provider] || null;
+}
+
+function getProviderLexicon(provider) {
+  const key = normalizeProvider(provider, 'yahoo');
+  const map = {
+    yahoo: {
+      tdLabel: 'TD Surge',
+      tdFallback: 'Touchdown scored',
+      topScoreBadge: 'Top Score',
+      momentumBadge: 'Momentum',
+      playerSurgeBadge: 'Player Surge'
+    },
+    espn: {
+      tdLabel: 'Scoring Play',
+      tdFallback: 'Scoring play detected',
+      topScoreBadge: 'Top Performer',
+      momentumBadge: 'Momentum Swing',
+      playerSurgeBadge: 'Player Pop'
+    },
+    sleeper: {
+      tdLabel: 'Point Spike',
+      tdFallback: 'Big scoring spike detected',
+      topScoreBadge: 'High Roller',
+      momentumBadge: 'Swing Alert',
+      playerSurgeBadge: 'Clutch Player'
+    },
+    mock: {
+      tdLabel: 'Demo TD',
+      tdFallback: 'Demo scoring event',
+      topScoreBadge: 'Demo Leader',
+      momentumBadge: 'Demo Swing',
+      playerSurgeBadge: 'Demo Surge'
+    }
+  };
+  return map[key] || map.yahoo;
+}
+
 function applyTheme(settings) {
-  document.documentElement.style.setProperty('--primary', settings.theme.primary || '#13f1b7');
-  document.documentElement.style.setProperty('--secondary', settings.theme.secondary || '#3d5cff');
-  document.documentElement.style.setProperty('--bg-glass', settings.theme.background || 'rgba(8, 12, 24, 0.72)');
-  document.documentElement.style.setProperty('--text-main', settings.theme.text || '#f6f8ff');
-  document.documentElement.style.setProperty('--text-muted', settings.theme.mutedText || '#aab3ca');
+  const context = getProviderThemeContext(settings);
+  const themePack = getThemePackForProvider(settings, context.provider);
+  const useProviderPack = context.mode !== 'off' && themePack;
+  const useManualOverrides = context.mode === 'off' || Boolean(settings?.theme?.providerOverrideEnabled);
+
+  const primary = useProviderPack ? String(themePack.primary || settings.theme.primary || '#13f1b7') : String(settings.theme.primary || '#13f1b7');
+  const secondary = useProviderPack ? String(themePack.secondary || settings.theme.secondary || '#3d5cff') : String(settings.theme.secondary || '#3d5cff');
+  const background = useProviderPack ? String(themePack.background || settings.theme.background || 'rgba(8, 12, 24, 0.72)') : String(settings.theme.background || 'rgba(8, 12, 24, 0.72)');
+  const textMain = useProviderPack ? String(themePack.text || settings.theme.text || '#f6f8ff') : String(settings.theme.text || '#f6f8ff');
+  const textMuted = useProviderPack ? String(themePack.mutedText || settings.theme.mutedText || '#aab3ca') : String(settings.theme.mutedText || '#aab3ca');
+
+  const finalTheme = useManualOverrides
+    ? {
+      primary: settings.theme.primary || primary,
+      secondary: settings.theme.secondary || secondary,
+      background: settings.theme.background || background,
+      textMain: settings.theme.text || textMain,
+      textMuted: settings.theme.mutedText || textMuted
+    }
+    : {
+      primary,
+      secondary,
+      background,
+      textMain,
+      textMuted
+    };
+
+  document.documentElement.style.setProperty('--primary', finalTheme.primary);
+  document.documentElement.style.setProperty('--secondary', finalTheme.secondary);
+  document.documentElement.style.setProperty('--bg-glass', finalTheme.background);
+  document.documentElement.style.setProperty('--text-main', finalTheme.textMain);
+  document.documentElement.style.setProperty('--text-muted', finalTheme.textMuted);
   document.documentElement.style.setProperty('--font-scale', String(settings.theme.fontScale || 1));
 
-  const displayFont = settings.overlay?.branding?.fontDisplay || 'Rajdhani';
-  const bodyFont = settings.overlay?.branding?.fontBody || displayFont || 'Rajdhani';
+  const branding = settings.overlay?.branding || {};
+  const displayFont = useProviderPack && !useManualOverrides
+    ? String(themePack.displayFont || branding.fontDisplay || 'Rajdhani')
+    : String(branding.fontDisplay || themePack?.displayFont || 'Rajdhani');
+  const bodyFont = useProviderPack && !useManualOverrides
+    ? String(themePack.bodyFont || branding.fontBody || displayFont || 'Rajdhani')
+    : String(branding.fontBody || themePack?.bodyFont || displayFont || 'Rajdhani');
+
   document.documentElement.style.setProperty('--font-display', `'${displayFont}', sans-serif`);
   document.documentElement.style.setProperty('--font-body', `'${bodyFont}', sans-serif`);
+}
+
+function renderProviderBadge() {
+  const node = $('providerBadge');
+  const settings = state.settings;
+  if (!settings) {
+    node.classList.add('hidden');
+    node.innerHTML = '';
+    return;
+  }
+
+  if (!settings.overlay?.providerBrandingEnabled) {
+    node.classList.add('hidden');
+    node.innerHTML = '';
+    return;
+  }
+
+  const context = getProviderThemeContext(settings);
+  if (!context.provider || context.mode === 'off') {
+    node.classList.add('hidden');
+    node.innerHTML = '';
+    return;
+  }
+
+  const pack = getThemePackForProvider(settings, context.provider) || {};
+  const label = String(pack.badgeLabel || context.provider).toUpperCase();
+  const color = String(pack.badgeColor || settings.theme.primary || '#13f1b7');
+  const logo = String(pack.badgeLogoUrl || '').trim()
+    ? `<img src="${escapeHtml(pack.badgeLogoUrl)}" alt="${escapeHtml(label)} logo" />`
+    : '';
+  const modeTag = context.mode === 'auto' ? 'AUTO' : 'MANUAL';
+
+  node.style.borderColor = `${color}99`;
+  node.style.boxShadow = `0 0 0 1px ${color}33 inset`;
+  node.innerHTML = `${logo}<span>${escapeHtml(label)} · ${modeTag}</span>`;
+  node.classList.remove('hidden');
 }
 
 function setDevUpdated(updatedAt) {
@@ -374,6 +525,7 @@ function renderTdEvents(tdEvents = []) {
 
   const duration = Number(state.settings.overlay.tdAlertDurationMs || 8000);
   const reducedMotion = Boolean(state.settings?.security?.reducedAnimations);
+  const lexicon = getProviderLexicon(getOverlayProviderSource());
 
   for (const event of tdEvents) {
     const card = document.createElement('article');
@@ -381,7 +533,7 @@ function renderTdEvents(tdEvents = []) {
 
     const title = document.createElement('p');
     title.className = 'td-title';
-    title.textContent = `${event.playerName || 'Player'} TD`;
+    title.textContent = `${event.playerName || 'Player'} ${lexicon.tdLabel}`;
 
     const subtitle = document.createElement('p');
     subtitle.className = 'td-sub';
@@ -393,7 +545,7 @@ function renderTdEvents(tdEvents = []) {
         : '',
       Array.isArray(event.tdTypes) && event.tdTypes.length ? event.tdTypes.join(', ') : ''
     ].filter(Boolean).join(' • ');
-    subtitle.textContent = details || 'Touchdown scored';
+    subtitle.textContent = details || lexicon.tdFallback;
 
     card.appendChild(title);
     card.appendChild(subtitle);
@@ -431,6 +583,7 @@ function buildStoryCards(matchups) {
   if (!matchups.length) {
     return stories;
   }
+  const lexicon = getProviderLexicon(getOverlayProviderSource());
 
   const highest = matchups.flatMap((matchup) => ([
     { matchup, team: matchup.teamA },
@@ -440,7 +593,7 @@ function buildStoryCards(matchups) {
   if (highest?.team) {
     stories.push({
       id: 'story-highest',
-      badge: 'Top Score',
+      badge: lexicon.topScoreBadge,
       title: `${highest.team.name} is pacing the slate`,
       body: `${formatScore(highest.team.points)} fantasy points with ${highest.team.manager || 'manager'} driving the surge.`
     });
@@ -465,7 +618,7 @@ function buildStoryCards(matchups) {
       const team = matchup.teamA.key === leadSwing.newLeaderKey ? matchup.teamA : matchup.teamB;
       stories.push({
         id: `story-swing-${leadSwing.matchupId}`,
-        badge: 'Momentum',
+        badge: lexicon.momentumBadge,
         title: `${team.name} just flipped the lead`,
         body: `${team.manager || 'Manager'} has the matchup edge in the latest swing.`
       });
@@ -476,7 +629,7 @@ function buildStoryCards(matchups) {
   if (playerSurge) {
     stories.push({
       id: `story-player-${playerSurge.playerKey}`,
-      badge: 'Player Surge',
+      badge: lexicon.playerSurgeBadge,
       title: `${playerSurge.playerName} is climbing fast`,
       body: `${playerSurge.fantasyTeamName} gained +${Number(playerSurge.delta).toFixed(2)} from this player on the last scan.`
     });
@@ -642,6 +795,7 @@ function render() {
   setDevUpdated(state.payload?.updatedAt || state.status?.lastSuccessAt);
   setDegradedIndicator(state.status);
   renderBranding();
+  renderProviderBadge();
 
   if (state.settings.overlay.mode === 'ticker') {
     renderTickerMode();

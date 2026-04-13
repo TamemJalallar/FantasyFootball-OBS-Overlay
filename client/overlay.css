@@ -437,6 +437,32 @@ body {
   background: rgba(45, 28, 8, 0.72);
 }
 
+.provider-badge {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(118, 141, 191, 0.55);
+  background: rgba(8, 14, 26, 0.72);
+  color: #e8f3ff;
+  font-size: calc(12px * var(--font-scale));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--font-display);
+}
+
+.provider-badge img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  border-radius: 99px;
+}
+
 .brand-watermark {
   position: absolute;
   right: 20px;
@@ -611,6 +637,12 @@ body.reduced-motion .footer-ticker .line {
     right: 10px;
     bottom: 10px;
     font-size: calc(11px * var(--font-scale));
+  }
+
+  .provider-badge {
+    top: 8px;
+    right: 10px;
+    font-size: calc(10px * var(--font-scale));
   }
 
   .matchup-wrap.two-up {

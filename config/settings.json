@@ -75,6 +75,9 @@
     "mode": "carousel",
     "matchupScope": "league",
     "focusTeam": "",
+    "providerThemeMode": "auto",
+    "providerThemeManual": "yahoo",
+    "providerBrandingEnabled": true,
     "rotationIntervalMs": 9000,
     "layout": "full",
     "twoMatchupLayout": false,
@@ -115,11 +118,62 @@
     "fontScale": 1,
     "darkMode": true,
     "compact": false,
+    "providerOverrideEnabled": false,
     "primary": "#13f1b7",
     "secondary": "#3d5cff",
     "background": "rgba(8, 12, 24, 0.72)",
     "text": "#f6f8ff",
-    "mutedText": "#aab3ca"
+    "mutedText": "#aab3ca",
+    "providerPacks": {
+      "yahoo": {
+        "primary": "#13f1b7",
+        "secondary": "#3d5cff",
+        "background": "rgba(8, 12, 24, 0.72)",
+        "text": "#f6f8ff",
+        "mutedText": "#aab3ca",
+        "displayFont": "Rajdhani",
+        "bodyFont": "Rajdhani",
+        "badgeLabel": "Yahoo",
+        "badgeColor": "#13f1b7",
+        "badgeLogoUrl": ""
+      },
+      "espn": {
+        "primary": "#ff4d57",
+        "secondary": "#aa1f29",
+        "background": "rgba(20, 7, 10, 0.82)",
+        "text": "#fff4f5",
+        "mutedText": "#e6b5b8",
+        "displayFont": "Teko",
+        "bodyFont": "Barlow",
+        "badgeLabel": "ESPN",
+        "badgeColor": "#ff4d57",
+        "badgeLogoUrl": ""
+      },
+      "sleeper": {
+        "primary": "#54e3cf",
+        "secondary": "#f7a83f",
+        "background": "rgba(7, 18, 23, 0.82)",
+        "text": "#eafcff",
+        "mutedText": "#9fc7cc",
+        "displayFont": "Oxanium",
+        "bodyFont": "Saira Condensed",
+        "badgeLabel": "Sleeper",
+        "badgeColor": "#54e3cf",
+        "badgeLogoUrl": ""
+      },
+      "mock": {
+        "primary": "#9fbcff",
+        "secondary": "#5c75c9",
+        "background": "rgba(14, 16, 26, 0.8)",
+        "text": "#eef1ff",
+        "mutedText": "#afb7d1",
+        "displayFont": "Rajdhani",
+        "bodyFont": "Rajdhani",
+        "badgeLabel": "Mock",
+        "badgeColor": "#9fbcff",
+        "badgeLogoUrl": ""
+      }
+    }
   },
   "dev": {
     "showUpdatedIndicator": true,
