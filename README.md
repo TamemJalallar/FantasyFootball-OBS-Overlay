@@ -1,45 +1,121 @@
-# Yahoo Fantasy Football OBS Overlay (Local)
+# Fantasy Football Overlay for OBS (Yahoo + ESPN + Sleeper)
 
-A local Node.js + Express app that builds a real-time Yahoo Fantasy Football overlay for OBS Browser Source.
+A local, production-minded Node.js app that renders a real-time fantasy football broadcast overlay for OBS Browser Source.
 
-It supports:
-- live matchup scoreboard polling
-- touchdown player scan + alerts
-- player-level scoring deltas for richer TD context
-- rotating matchup carousel/ticker layouts
-- no-refresh overlay updates via SSE
-- admin/config UI with profile switching
-- reliability features (cache fallback, retries, circuit breaker, diagnostics)
+Use it to show rotating weekly matchups, ticker mode, touchdown/lead-change alerts, provider-aware themes, and scene-specific overlay routes.
 
-## Architecture
+## Table of Contents
 
-### Backend (`/server`)
-- `index.js`: Express app, routes, SSE bootstrap.
-- `dataService.js`: polling engine, change detection, TD scan, event pipeline.
-- `yahooAuth.js`: Yahoo OAuth flow and token refresh.
-- `yahooApi.js`: Yahoo REST calls.
-- `normalizer.js`: converts Yahoo payloads to a stable internal overlay model.
-- `configStore.js`: settings load/validate/save.
-- `tokenStore.js`, `secretStore.js`, `keychainStore.js`: local secret/token persistence.
-- `historyStore.js`: optional snapshot/event history (SQLite when available).
-- `profileStore.js`: multi-league profile save/switch.
-- `audioQueue.js`: throttled event hook dispatch.
-- `obsController.js`: optional OBS WebSocket scene triggers.
-- `metrics.js`: lightweight counters/gauges + Prometheus text endpoint.
+- [What You Get](#what-you-get)
+- [Screenshots](#screenshots)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [5-Minute Local Start (Mock Mode)](#5-minute-local-start-mock-mode)
+- [Environment Variables (.env)](#environment-variables-env)
+- [Configuration Precedence](#configuration-precedence)
+- [First-Run Setup (Recommended Path)](#first-run-setup-recommended-path)
+- [Provider Setup](#provider-setup)
+- [Admin UI Guide (/admin)](#admin-ui-guide-admin)
+- [Setup Center (/setup)](#setup-center-setup)
+- [Overlay Modes and Scene Routes](#overlay-modes-and-scene-routes)
+- [Show All Matchups vs One Team](#show-all-matchups-vs-one-team)
+- [OBS Browser Source Setup](#obs-browser-source-setup)
+- [Go-Live Checklist (Before Stream)](#go-live-checklist-before-stream)
+- [Security Model](#security-model)
+- [Data Persistence and Secret Storage](#data-persistence-and-secret-storage)
+- [API and Route Reference](#api-and-route-reference)
+- [Reliability and Polling Defaults](#reliability-and-polling-defaults)
+- [Touchdown and Score Delta Behavior](#touchdown-and-score-delta-behavior)
+- [Theme and Provider Branding](#theme-and-provider-branding)
+- [Backup, Import, and Export](#backup-import-and-export)
+- [Developer Commands](#developer-commands)
+- [Docker (Optional)](#docker-optional)
+- [Troubleshooting (No-Guesswork)](#troubleshooting-no-guesswork)
+- [Repository Details and Metadata](#repository-details-and-metadata)
+- [License](#license)
 
-### Frontend (`/client`)
-- `overlay.html/css/js`: broadcast overlay rendering for `/overlay`.
-- `admin.html/css/js`: local control panel at `/admin`.
+## What You Get
 
-### Data Flow
-1. Poll scoreboard at high frequency.
-2. Normalize matchup payload.
-3. Detect score/lead/upset/final changes.
-4. Broadcast `update`/`status` events over SSE.
-5. Overlay applies updates without full rerender.
-6. Separate TD scanner runs on its own interval and emits TD events.
+- Local-first app (`Express + vanilla HTML/CSS/JS`)
+- Live overlay updates via `Server-Sent Events (SSE)` with frontend polling fallback
+- High-frequency scoreboard + TD scan polling (default 10s / 10s)
+- Providers: `Yahoo`, `ESPN`, `Sleeper`, plus `Mock` mode
+- Admin control panel (`/admin`) for config + runtime controls
+- Setup Center (`/setup`) for guided OBS scene setup with copy-ready URLs
+- Per-scene routes (`/overlay/lower-third`, `/overlay/sidebar-widget`, etc.)
+- Matchup scope modes:
+  - Show all league matchups
+  - Show only one focus team
+- Reliability features:
+  - Cache fallback
+  - Circuit breaker + retries
+  - Safe mode startup fallback
+  - Schedule-aware polling
+- Optional extras:
+  - Audio event hooks
+  - Discord/Slack webhook notifications
+  - OBS WebSocket scene switching
+  - History export (JSON/CSV)
 
-## Quick Start
+## Screenshots
+
+![Admin Config](docs/screenshots/admin-config.png)
+
+![Overlay Centered Card](docs/screenshots/overlay-centered-card.png)
+
+![Overlay Lower Third](docs/screenshots/overlay-lower-third.png)
+
+![Overlay Sidebar Two Up](docs/screenshots/overlay-sidebar-two-up.png)
+
+![Overlay Bottom Ticker](docs/screenshots/overlay-bottom-ticker.png)
+
+![Overlay Animated Demo](docs/screenshots/overlay-demo.gif)
+
+## Project Structure
+
+```text
+.
+├── cache/
+├── client/
+│   ├── admin.html / admin.css / admin.js
+│   ├── overlay.html / overlay.css / overlay.js
+│   └── setup.html / setup.css / setup.js
+├── config/
+│   ├── settings.json
+│   └── settings.example.json
+├── docs/
+│   └── screenshots/
+├── public/
+│   ├── assets/
+│   └── themes/
+├── server/
+│   ├── index.js
+│   ├── dataService.js
+│   ├── yahooAuth.js / yahooApi.js
+│   ├── espnApi.js / sleeperApi.js
+│   ├── normalizer.js
+│   ├── configStore.js / tokenStore.js / secretStore.js
+│   └── ...
+├── test/
+├── .env.example
+├── Dockerfile
+└── docker-compose.yml
+```
+
+## Prerequisites
+
+- Node.js `18.17+` (Node `20.x` or `22.x` recommended)
+- npm
+- OBS Studio (latest stable recommended)
+- Yahoo Developer app (only if using Yahoo provider)
+
+Notes:
+- `history.db` snapshot features use `node:sqlite` and work best on newer Node versions (Node `22` is safest).
+- App still runs if SQLite history is unavailable.
+
+## 5-Minute Local Start (Mock Mode)
+
+This is the fastest way to confirm overlay + UI without auth.
 
 1. Install dependencies:
 ```bash
@@ -51,198 +127,316 @@ npm install
 cp .env.example .env
 ```
 
-3. Start local server:
+3. Keep mock mode enabled in `.env`:
+```bash
+MOCK_MODE=true
+```
+
+4. Start app:
 ```bash
 npm run dev
 ```
 
-4. Open:
+5. Open:
 - Admin: [http://localhost:3030/admin](http://localhost:3030/admin)
 - Setup Center: [http://localhost:3030/setup](http://localhost:3030/setup)
 - Overlay: [http://localhost:3030/overlay](http://localhost:3030/overlay)
 
-## Screenshots
+If this works, your OBS/browser pipeline is good and you can switch to live provider data next.
 
-### Animated Demo
+## Environment Variables (`.env`)
 
-![Overlay Animated Demo](docs/screenshots/overlay-demo.gif)
-
-### Admin / Config
-
-![Admin Config](docs/screenshots/admin-config.png)
-
-### Overlay - Centered Card
-
-![Overlay Centered Card](docs/screenshots/overlay-centered-card.png)
-
-### Overlay - Lower Third
-
-![Overlay Lower Third](docs/screenshots/overlay-lower-third.png)
-
-### Overlay - Sidebar Two-Up
-
-![Overlay Sidebar Two Up](docs/screenshots/overlay-sidebar-two-up.png)
-
-### Overlay - Bottom Ticker
-
-![Overlay Bottom Ticker](docs/screenshots/overlay-bottom-ticker.png)
-
-To regenerate the GIF after UI updates:
-```bash
-node scripts/generate-demo-gif.js
-```
-
-## `.env.example`
+Start from `.env.example`:
 
 ```bash
 PORT=3030
 APP_BASE_URL=http://localhost:3030
+
+# Yahoo (optional if entered in /admin)
 YAHOO_CLIENT_ID=
 YAHOO_CLIENT_SECRET=
 YAHOO_REDIRECT_URI=http://localhost:3030/auth/callback
+
+# ESPN (optional defaults)
+ESPN_LEAGUE_ID=
+ESPN_SEASON=
+ESPN_WEEK=current
+ESPN_SWID=
+ESPN_S2=
+
+# Sleeper (optional defaults)
+SLEEPER_LEAGUE_ID=
+SLEEPER_SEASON=
+SLEEPER_WEEK=current
+
+# Startup mode
 MOCK_MODE=true
+
+# Optional route protections
 ADMIN_API_KEY=
+OVERLAY_API_KEY=
+
+# macOS keychain support
 USE_OS_KEYCHAIN=false
 ```
 
-## Yahoo OAuth Setup
+Important behavior:
+- `ADMIN_API_KEY` protects admin/config routes.
+- `OVERLAY_API_KEY` protects `/overlay`, `/events`, `/setup`, and public snapshot/config routes.
+- If overlay key is set, pass `?overlayKey=YOUR_KEY` in OBS URLs (or `x-overlay-key` header).
 
-1. Create Yahoo Developer app.
-2. Set callback URI to `http://localhost:3030/auth/callback`.
-3. In `/admin`, set `clientId`, `clientSecret`, redirect URI, and scope.
+## Configuration Precedence
+
+When the app starts, settings are resolved in this order:
+
+1. Built-in defaults (`server/defaultSettings.js`)
+2. `config/settings.json`
+3. Environment variables from `.env`
+4. Runtime updates saved from `/admin`
+
+Practical tip:
+- If a value keeps reverting, check both `.env` and `/admin` for the same field.
+
+## First-Run Setup (Recommended Path)
+
+1. Start app with `npm run dev`.
+2. Open `/admin`.
+3. Set provider and league details.
 4. Save settings.
-5. Click **Start Yahoo OAuth** and complete auth.
+5. Authorize provider if needed (Yahoo OAuth).
+6. Run `Test API Connection`.
+7. Open `/setup` and copy scene URLs.
+8. Add those URLs in OBS Browser Sources.
 
-Storage behavior:
-- Tokens: `config/tokens.json` (or macOS Keychain when enabled).
-- Client secret/admin key: `config/secrets.json` (or macOS Keychain when enabled).
-- Use `USE_OS_KEYCHAIN=true` or Admin setting `security.useOsKeychain=true` on macOS.
+## Provider Setup
 
-## High-Frequency Polling + TD Scan
+### Yahoo Setup (OAuth)
 
-Default frequency:
-- scoreboard: every `10s` (`data.scoreboardPollMs`)
-- TD scan: every `10s` (`data.tdScanIntervalMs`)
+Yahoo requires OAuth before live data is available.
 
-Adaptive polling:
-- live slate: `adaptivePolling.liveMs`
-- mixed slate: `adaptivePolling.mixedMs`
-- idle slate: `adaptivePolling.idleMs`
+1. Create a Yahoo developer app.
+2. Add callback URL exactly as:
+   - `http://localhost:3030/auth/callback`
+3. In `/admin` -> Yahoo OAuth section, fill:
+   - `Client ID`
+   - `Client Secret`
+   - `Redirect URI`
+   - `Scope` (default `fspt-r`)
+4. Save settings.
+5. Click `Start Yahoo OAuth`.
+6. Complete authorization in browser.
+7. Return to `/admin` and run `Test API Connection`.
 
-Reliability controls:
-- retry backoff + jitter
-- circuit breaker with cooldown
-- cached payload fallback
-- preserved overlay rendering in degraded mode
-- schedule-aware overnight throttling (NFL window aware)
-- safe-mode startup fallback to cached/mock payload when Yahoo is unavailable
+You also need league targeting set:
+- `League ID`
+- `Game Key` (preferred) or `Season`
+- `Week` (`current` or custom week)
 
-## Overlay Features
+### ESPN Setup
 
-- carousel or ticker mode
-- matchup scope: full league or a single focus team
-- provider-aware theming (`auto`, `manual`, `off`) for Yahoo/ESPN/Sleeper/Mock
-- provider badge overlay (toggleable)
-- one-matchup or two-matchup layout
-- score/projection/record/logo toggles
-- smooth transitions for matchup rotation
-- score delta indicators on changed scores
-- closest matchup and upset highlight
-- auto-redzone focus lock on close/upset/active swings
-- matchup story cards between rotations (top score, closest game, momentum/player surge)
-- final-score styling
-- optional pinned Game of the Week
-- dev-only updated indicator
-- transparent background for OBS
+1. In `/admin` set Provider = `ESPN`.
+2. Enter:
+   - `ESPN League ID`
+   - `ESPN Season`
+   - `ESPN week` (`current` or custom)
+3. For private leagues, also provide:
+   - `SWID`
+   - `espn_s2`
+4. Save and run `Test API Connection`.
 
-## Admin Features
+### Sleeper Setup
 
-From `/admin` you can:
-- manage Yahoo credentials + OAuth
-- configure league id/game key/season/week
-- set scoreboard and TD polling intervals
-- configure schedule-aware polling window and off-hours poll rates
-- tune adaptive polling + circuit breaker
-- enable safe mode fallback behavior
-- set matchup scope to all league matchups or one team only (with team picker suggestions)
-- configure provider theme mode and apply provider defaults in one click
-- export a scene setup guide file with labeled OBS URLs
-- use first-run setup checklist for auth/data/overlay readiness
-- save/apply provider-specific visual profiles for fast provider switching
-- enable/disable projections/records/logos/ticker
-- set theme colors/font scale/layout mode
-- switch theme packs with one click
-- save/switch/delete profiles (multi-league)
-- force refresh and force next matchup
-- export/import config JSON
-- use Scene Setup Map cards (labeled presets, placement guidance, copy-ready URLs/scene names)
-- view diagnostics/events history
-- export matchup timeline as JSON or CSV from history store
-- configure audio hook and OBS scene automation
+1. In `/admin` set Provider = `Sleeper`.
+2. Enter:
+   - `Sleeper League ID`
+   - `Sleeper Season`
+   - `Sleeper week` (`current` or custom)
+3. Save and run `Test API Connection`.
 
-## Setup Center Page
+### Mock Setup
 
-Use `/setup` for a guided onboarding page with:
-- setup checklist (provider config, auth, league target, live data, overlay URL)
-- scene preset cards with copy-ready OBS URLs
-- scene guide export (`obs-scene-setup-guide.md`)
-- provider-theme quick links
-- repo details panel (version, branch, commit, last commit subject/date)
+1. Set Provider = `Mock` or keep `MOCK_MODE=true`.
+2. Optionally set a `Mock Seed` for deterministic previews.
+3. Save and preview overlays.
 
-## Scene Presets + Query Params
+## Admin UI Guide (`/admin`)
 
-Overlay route is fixed at `/overlay`.
+Main panels you will use most:
 
-Useful params:
-- `preset=centered-card`
-- `preset=lower-third`
-- `preset=sidebar-widget`
-- `preset=bottom-ticker`
-- `mode=ticker`
-- `scope=team`
-- `team=<team_key_or_name>`
-- `providerTheme=auto|off|yahoo|espn|sleeper|mock`
-- `twoUp=1`
-- `scale=0.90`
+- `Admin Access`:
+  - Optional admin key + overlay read key
+  - Reduced motion toggle
+  - OS keychain toggle
+- `Yahoo OAuth`:
+  - Start auth
+  - Clear stored tokens
+- `League & Polling`:
+  - Provider selection
+  - League/week targeting
+  - High-frequency polling (`scoreboardPollMs`, `tdScanIntervalMs`)
+  - Adaptive/schedule-aware polling
+  - Safe mode + circuit breaker + rate budget
+- `Overlay Behavior`:
+  - Carousel vs ticker
+  - Scene preset
+  - Matchup scope: all league or one focus team
+  - Theme mode (auto/manual/off)
+  - Story cards, auto-redzone, deltas, highlights
+- `Theme`:
+  - Colors, background, font scale
+  - Provider override behavior
+- `Branding & Integrations`:
+  - League title/watermark
+  - Discord/Slack webhooks
+- `Audio Queue`:
+  - Event templates and dispatch controls
+- `OBS Automation`:
+  - OBS WebSocket config + scene mappings
+- `Diagnostics`:
+  - API latency, error counts, circuit state, SSE clients, next poll times
+  - Export history JSON/CSV
+- `OBS Links / Scene Setup Map / Setup Checklist`:
+  - Copy-ready URLs and labels for stream operators
 
-Direct scene routes (OBS-friendly):
+## Setup Center (`/setup`)
+
+Use this as the operator-facing page for getting OBS ready.
+
+It includes:
+- Setup checklist (provider/auth/league/data/sync/overlay URL)
+- Scene preset cards with:
+  - Label
+  - Use case
+  - Placement
+  - Recommended size
+  - Copy URL / Copy Label buttons
+- Provider theme quick preview links
+- Repo details:
+  - version
+  - branch
+  - commit
+  - last commit timestamp + subject
+  - dirty/clean working tree
+
+It can export `obs-scene-setup-guide.md` directly.
+
+## Overlay Modes and Scene Routes
+
+Base route:
+- `/overlay`
+
+Preset routes (best for OBS scene naming):
 - `/overlay/centered-card`
 - `/overlay/lower-third`
 - `/overlay/sidebar-widget`
 - `/overlay/bottom-ticker`
 - `/overlay/ticker`
 
-Example:
-- `http://localhost:3030/overlay?preset=lower-third&scale=0.95`
+Useful query params:
+- `preset=centered-card|lower-third|sidebar-widget|bottom-ticker`
+- `mode=carousel|ticker`
+- `twoUp=1`
+- `scale=0.90`
+- `scope=league|team`
+- `team=<team_key_or_name>`
+- `providerTheme=auto|off|yahoo|espn|sleeper|mock`
+- `overlayKey=<OVERLAY_API_KEY>` (if enabled)
+
+Examples:
+- `http://localhost:3030/overlay/lower-third?scale=0.95`
 - `http://localhost:3030/overlay/centered-card?scope=team&team=449.l.12345.t.1`
 - `http://localhost:3030/overlay/ticker?providerTheme=espn`
+- `http://localhost:3030/overlay/sidebar-widget?overlayKey=YOUR_KEY`
+
+## Show All Matchups vs One Team
+
+Option A: All league matchups
+1. In `/admin` set `Matchup Scope = All League Matchups`.
+2. Save.
+
+Option B: One team only
+1. In `/admin` set `Matchup Scope = Only One Team`.
+2. Set `Focus Team` (team key or exact team name).
+3. Save.
+
+Equivalent URL override:
+- `?scope=team&team=<team_key_or_name>`
 
 ## OBS Browser Source Setup
 
-1. In OBS, add **Browser Source**.
-2. URL: `http://localhost:3030/overlay`.
-3. Recommended size: `1920 x 1080`.
-4. Keep transparency enabled.
-5. Optional: duplicate Browser Source with different query params per scene preset.
+For each scene in OBS:
 
-## API Endpoints
+1. Add `Browser Source`.
+2. URL = one of your overlay preset URLs.
+3. Width/height guidance:
+   - centered-card: `1920x1080`
+   - lower-third: `1920x420`
+   - sidebar-widget: `640x1080`
+   - bottom-ticker: `1920x220`
+   - ticker: `1920x140`
+4. Enable transparent background in scene composition.
+5. If overlay key is enabled, include `?overlayKey=...` in URL.
+6. Optional OBS Browser Source flags:
+   - `Shutdown source when not visible`
+   - `Refresh browser when scene becomes active`
 
-Public:
+Pro tip:
+- Use `/setup` Scene Preset labels directly as OBS scene names.
+
+## Go-Live Checklist (Before Stream)
+
+1. `/admin` shows successful `Test API Connection`.
+2. `/setup` checklist shows Provider/Auth/League/Data all passing.
+3. OBS Browser Source URLs include `overlayKey` if required.
+4. At least one overlay preset is visible and updating in OBS preview.
+5. Polling intervals are confirmed for game window (`scoreboardPollMs` and `tdScanIntervalMs`).
+6. Optional integrations (audio, Discord/Slack, OBS WebSocket) are tested once manually.
+
+## Security Model
+
+- Admin API routes require key only if `ADMIN_API_KEY` or `security.adminApiKey` is set.
+- Overlay/read routes require key only if `security.overlayApiKey` is set.
+
+Header/query auth support:
+- Admin:
+  - Header: `x-admin-key`
+  - Query fallback: `?adminKey=...`
+- Overlay/read:
+  - Header: `x-overlay-key`
+  - Query fallback: `?overlayKey=...`
+
+## Data Persistence and Secret Storage
+
+- Main settings: `config/settings.json`
+- OAuth tokens: `config/tokens.json` (or macOS Keychain)
+- Secrets: `config/secrets.json` (or macOS Keychain)
+- History DB: `cache/history.db` (when SQLite available)
+
+Security detail:
+- `config/settings.json` intentionally persists secret fields as blank values.
+- Secrets are resolved from `config/secrets.json` or Keychain at runtime.
+
+## API and Route Reference
+
+Public (no admin key required):
 - `GET /health`
 - `GET /metrics`
-- `GET /events`
-- `GET /api/public-config`
-- `GET /overlay`
+- `GET /api/repo-details`
+- `GET /admin`
+
+Overlay-read protected only when overlay key is configured:
 - `GET /setup`
+- `GET /overlay`
 - `GET /overlay/centered-card`
 - `GET /overlay/lower-third`
 - `GET /overlay/sidebar-widget`
 - `GET /overlay/bottom-ticker`
 - `GET /overlay/ticker`
-- `GET /api/repo-details`
-- `GET /admin`
+- `GET /events`
+- `GET /api/public-config`
+- `GET /api/public-snapshot`
 
-Admin-protected (when `ADMIN_API_KEY` configured):
+Admin-protected (when admin key configured):
 - `GET /api/config`
 - `PUT /api/config`
 - `GET /api/config/export`
@@ -251,74 +445,215 @@ Admin-protected (when `ADMIN_API_KEY` configured):
 - `GET /api/diagnostics`
 - `GET /api/history`
 - `GET /api/history/export?format=json|csv&hours=168`
+- `POST /api/history/replay`
 - `GET /api/data`
 - `POST /api/refresh`
 - `POST /api/test-connection`
 - `POST /api/control/next`
+- `POST /api/control/pause`
+- `POST /api/control/resume`
+- `POST /api/control/pin`
+- `POST /api/control/unpin`
+- `POST /api/control/story`
 - `POST /api/auth/logout`
-- `GET /auth/start`
 - `GET /api/profiles`
 - `POST /api/profiles/save`
 - `POST /api/profiles/switch`
 - `DELETE /api/profiles/:profileId`
+- `GET /auth/start`
 
-## Mock/Fallback Mode
+## Reliability and Polling Defaults
 
-Use mock mode when Yahoo auth is not ready:
-- Set `MOCK_MODE=true` in `.env`, or
-- Toggle in Admin Data settings.
+Default high-frequency behavior:
+- Scoreboard poll: `10000ms`
+- TD scan: `10000ms`
 
-Mock mode keeps overlay fully testable for OBS scene/layout work.
+Guardrails:
+- Minimum poll interval clamp is `5000ms`.
+- Adaptive polling can run slower when slate is less active.
+- Schedule-aware mode slows polling during off-hours.
+- Circuit breaker opens after repeated failures and cools down.
+- Safe mode can force startup fallback to cache/mock when auth is down.
 
-## Tests and CI
+## Touchdown and Score Delta Behavior
 
-Run locally:
+- TD scanner runs separately from scoreboard polling.
+- Player-level scoring deltas are tracked and emitted as alert events.
+- Dedup window prevents duplicate TD spam (`tdDedupWindowMs`).
+- Overlay highlights score changes without full page refresh/flicker.
+
+## Theme and Provider Branding
+
+Theme modes:
+- `auto`: use provider from current data source
+- `manual`: force provider theme (`yahoo`, `espn`, `sleeper`, `mock`)
+- `off`: use custom theme only
+
+Theme packs available:
+- `neon-grid`
+- `classic-gold`
+- `ice-night`
+
+You can also:
+- enable provider badge
+- apply provider defaults in admin
+- override colors/fonts per profile
+- use visual profile save/apply for quick switching
+
+## Backup, Import, and Export
+
+- Export config: `GET /api/config/export` from admin UI button
+- Import config: `POST /api/config/import` from admin UI button
+- Export timeline: JSON/CSV from diagnostics panel
+
+Recommended routine:
+1. Export config before big changes.
+2. Save named profiles for each league/provider.
+3. Keep `config/settings.json` under version control if desired.
+4. Keep secrets out of git (`.env`, `config/secrets.json`, tokens).
+
+## Developer Commands
+
+Run app:
+```bash
+npm run dev
+```
+
+Run tests:
 ```bash
 npm test
 ```
 
-GitHub Actions CI (`.github/workflows/ci.yml`) runs on push/PR:
-- dependency install
-- syntax checks
-- unit tests
+Syntax check:
+```bash
+npm run check:syntax
+```
 
-## Troubleshooting
+Refresh screenshots + manifest:
+```bash
+npm run screenshots:refresh
+```
 
-### OAuth callback fails
-- Verify redirect URI exactly matches Yahoo app config.
-- Confirm client id/secret are valid.
-- Use **Clear Stored Tokens** and retry.
+Generate demo GIF:
+```bash
+npm run demo:gif
+```
 
-### No live data
-- Confirm league id and game key/season.
-- Run **Test API Connection** in admin.
-- Temporarily enable mock mode to verify overlay pipeline.
+Generate changelog:
+```bash
+npm run changelog:generate -- 1.0.0
+```
 
-### Overlay not updating
-- Check `/events` stream connectivity.
-- Check `/health` and `/metrics`.
-- Watch `/api/diagnostics` for polling errors/circuit-open state.
+## Docker (Optional)
 
-### TD alerts missing
-- Ensure TD alerts are enabled.
-- TD scan only tracks active lineup slots (bench/IR excluded).
-- Dedup cooldown may suppress repeat events for same player total.
+Build and run with compose:
+```bash
+docker compose up --build
+```
 
-### Admin routes return 401
-- If `ADMIN_API_KEY` is set, pass `x-admin-key` with admin requests.
+Then open:
+- [http://localhost:3030/admin](http://localhost:3030/admin)
+- [http://localhost:3030/overlay](http://localhost:3030/overlay)
 
-### SQLite history unavailable
-- `node:sqlite` may be unavailable on older Node versions.
-- App will continue running; history snapshots are disabled gracefully.
+## Troubleshooting (No-Guesswork)
 
-## Customization Notes
+### 401 Unauthorized on `/admin` API
 
-Primary customization files:
-- `config/settings.json` for persistent settings
-- `client/overlay.css` for bespoke broadcast styling
-- `public/themes/*.css` for reusable theme packs
+Cause:
+- Admin key is enabled but not provided.
 
-For league-specific branding:
-- use `league.teamNameOverrides`
-- change `theme.primary`, `theme.secondary`, `theme.background`, `theme.text`
-- set `overlay.scenePreset`, `overlay.layout`, `overlay.rotationIntervalMs`
+Fix:
+1. Enter key in Admin Access section.
+2. Or send header `x-admin-key`.
+3. Or use query `?adminKey=...` when launching OAuth start route.
+
+### 401 Unauthorized on `/overlay` or `/setup`
+
+Cause:
+- Overlay read key is enabled.
+
+Fix:
+1. Append `?overlayKey=YOUR_KEY` to overlay/setup URLs.
+2. For custom clients, send `x-overlay-key` header.
+
+### Yahoo OAuth callback failure
+
+Cause:
+- Redirect URI mismatch.
+
+Fix:
+1. Ensure Yahoo app callback exactly equals `http://localhost:3030/auth/callback`.
+2. Ensure same value in `/admin` redirect URI.
+3. Clear stored tokens and re-run OAuth.
+
+### Test API connection fails
+
+Cause:
+- Provider credentials/league/week mismatch or private league cookies missing.
+
+Fix:
+1. Confirm provider selection.
+2. Confirm league ID and season/week values.
+3. For ESPN private leagues, set SWID + espn_s2.
+4. Use Mock mode to verify overlay rendering path.
+
+### Overlay loads but does not update
+
+Cause:
+- SSE interrupted or key mismatch.
+
+Fix:
+1. Check `/health` and `/metrics`.
+2. Verify `/events` is reachable with same overlay key.
+3. Confirm browser source URL includes `overlayKey` if enabled.
+4. Check diagnostics for circuit breaker/fallback state.
+
+### TD alerts are not appearing
+
+Cause:
+- Alerts disabled, dedup suppression, or provider payload limitations.
+
+Fix:
+1. Enable `Show TD Alerts`.
+2. Lower dedup window for testing.
+3. Verify active lineup data is available.
+4. Confirm provider polling is successful in diagnostics.
+
+### History export is empty
+
+Cause:
+- SQLite history unavailable or history disabled.
+
+Fix:
+1. Enable history in admin.
+2. Use Node version with `node:sqlite` support.
+3. Confirm `cache/history.db` is being created.
+
+### GitHub Actions release workflow failed
+
+Fix checklist:
+1. Run locally: `npm run check:syntax && npm test`.
+2. Refresh screenshots if manifest mismatch:
+   - `npm run screenshots:refresh`
+3. Re-run release after commit includes changed manifest/assets.
+
+## Repository Details and Metadata
+
+The app exposes repo metadata for the Setup Center:
+- `GET /api/repo-details`
+
+Source fields include:
+- package name/version
+- repository URL
+- git branch
+- full + short commit SHA
+- last commit timestamp and subject
+- working tree clean/dirty status
+- active Node runtime version
+
+Repository URL:
+- [TamemJalallar/FantasyFootball-Yahoo](https://github.com/TamemJalallar/FantasyFootball-Yahoo)
+
+## License
+
+MIT
