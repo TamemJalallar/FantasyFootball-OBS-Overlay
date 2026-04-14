@@ -4,6 +4,7 @@
 <span class="week-label">Week 7</span>
 </header>
 <article class="team-row leading">
+<p class="team-name-top">Sunday Surge</p>
 <div class="logo logo-fallback" aria-hidden="true">SS</div>
 <div class="team-meta">
 <p class="team-name">Sunday Surge</p>
@@ -16,6 +17,7 @@
 </div>
 </article>
 <article class="team-row ">
+<p class="team-name-top">Gridiron Reapers</p>
 <div class="logo logo-fallback" aria-hidden="true">GR</div>
 <div class="team-meta">
 <p class="team-name">Gridiron Reapers</p>
