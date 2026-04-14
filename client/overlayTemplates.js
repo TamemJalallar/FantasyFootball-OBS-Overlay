@@ -63,6 +63,7 @@
 
     return `
       <article class="team-row ${isLeading ? 'leading' : ''}">
+        <p class="team-name-top">${escapeHtml(team?.name)}</p>
         ${createLogoNode(team, settings)}
         <div class="team-meta">
           <p class="team-name">${escapeHtml(team?.name)}</p>

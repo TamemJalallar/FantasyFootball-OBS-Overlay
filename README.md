@@ -1,3 +1,5 @@
+![Fantasy Football Overlay Banner](public/assets/GitHub-Banner.png)
+
 # Fantasy Football Overlay for OBS (Yahoo + ESPN + Sleeper)
 
 A local, production-minded Node.js app that renders a real-time fantasy football broadcast overlay for OBS Browser Source.
